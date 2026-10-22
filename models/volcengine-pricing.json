@@ -1,0 +1,86 @@
+{
+  "verified_on": "2026-10-21",
+  "source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh",
+  "currency": "CNY",
+  "basis": "公开刊例价，不含资源包、账户优惠及版权IP附加费；video按每百万Token计价，数组依次为无视频输入、有视频输入；image按张及像素档位计价，single/layer数组依次为低像素档、高像素档，input_after_first为首张之后每张输入图单价",
+  "video": {
+    "seedance-2.5": {
+      "480p": [
+        70,
+        42
+      ],
+      "720p": [
+        70,
+        42
+      ],
+      "1080p": [
+        77,
+        46
+      ]
+    },
+    "seedance-2.0": {
+      "480p": [
+        46,
+        28
+      ],
+      "720p": [
+        46,
+        28
+      ],
+      "1080p": [
+        51,
+        31
+      ],
+      "4k": [
+        26,
+        16
+      ]
+    },
+    "seedance-2.0-fast": {
+      "480p": [
+        37,
+        22
+      ],
+      "720p": [
+        37,
+        22
+      ]
+    },
+    "seedance-2.0-mini": {
+      "480p": [
+        23,
+        14
+      ],
+      "720p": [
+        23,
+        14
+      ]
+    }
+  },
+  "image": {
+    "seedream-5.0-pro": {
+      "input_after_first": 0.02,
+      "single": [
+        0.3,
+        0.6
+      ],
+      "layer": [
+        0.15,
+        0.3
+      ],
+      "threshold_pixels": 2610000
+    },
+    "seedream-5.0-flash": {
+      "input_after_first": 0,
+      "single": [
+        0.12,
+        0.12
+      ],
+      "layer": [
+        0.12,
+        0.12
+      ],
+      "threshold_pixels": 2610000
+    }
+  }
+}

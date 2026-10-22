@@ -1,0 +1,87 @@
+{
+  "verified_on": "2026-10-21",
+  "source": "https://docs.byteplus.com/en/docs/modelark/model-pricing",
+  "currency": "USD",
+  "basis": "BytePlus public list price in USD; excludes account discounts, storage, licensed IP and payment/FX charges; video: per million tokens, arrays ordered as without/with input video; image: per image and pixel tier, single/layer arrays ordered as low/high pixel tier, input_after_first is the rate per input image after the first",
+  "image": {
+    "seedream-5.0-pro": {
+      "input_after_first": 0.003,
+      "single": [
+        0.045,
+        0.09
+      ],
+      "layer": [
+        0.0225,
+        0.045
+      ],
+      "threshold_pixels": 2610000
+    },
+    "seedream-5.0-flash": {
+      "input_after_first": 0,
+      "single": [
+        0.018,
+        0.018
+      ],
+      "layer": [
+        0.018,
+        0.018
+      ],
+      "threshold_pixels": 2610000
+    }
+  },
+  "provider": "byteplus",
+  "video": {
+    "seedance-2.5": {
+      "480p": [
+        10.7,
+        6.4
+      ],
+      "720p": [
+        10.7,
+        6.4
+      ],
+      "1080p": [
+        11.7,
+        7
+      ]
+    },
+    "seedance-2.0": {
+      "480p": [
+        7,
+        4.3
+      ],
+      "720p": [
+        7,
+        4.3
+      ],
+      "1080p": [
+        7.7,
+        4.7
+      ],
+      "4k": [
+        4,
+        2.4
+      ]
+    },
+    "seedance-2.0-fast": {
+      "480p": [
+        5.6,
+        3.3
+      ],
+      "720p": [
+        5.6,
+        3.3
+      ]
+    },
+    "seedance-2.0-mini": {
+      "480p": [
+        3.5,
+        2.1
+      ],
+      "720p": [
+        3.5,
+        2.1
+      ]
+    }
+  }
+}

@@ -1,0 +1,8 @@
+# 技能在界面中的展示元数据；不包含密钥，也不改变供应商调用参数。
+interface:
+  # 供技能选择器显示的中文名称。
+  display_name: "富媒体生成器"
+  # 列表中的简要能力说明，保留两家供应商的标准显示名称。
+  short_description: "通过 Volcengine 与 BytePlus 生成图片视频"
+  # 用户启动技能时的默认提示，遵循任务确认单与供应商选择流程。
+  default_prompt: "使用 $richmedia-creator 创建图片或视频，先展示任务确认单，等用户选择供应商并确认后生成。"

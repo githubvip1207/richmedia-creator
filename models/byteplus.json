@@ -1,0 +1,198 @@
+{
+  "verified_on": "2026-10-21",
+  "source": "https://docs.byteplus.com/en/docs/modelark/model-list",
+  "models": {
+    "seedance-2.5": {
+      "id": "dreamina-seedance-2-5-260628",
+      "kind": "video",
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "max_duration": 30,
+      "limits": {
+        "image": 30,
+        "video": 10,
+        "audio": 10
+      },
+      "formats": [
+        "mp4",
+        "mov"
+      ],
+      "operations": [
+        "text-to-video",
+        "image-to-video",
+        "reference-to-video",
+        "extend-video"
+      ],
+      "modes": {
+        "image-to-video": [
+          "first-frame",
+          "first-last-frame"
+        ],
+        "reference-to-video": [
+          "reference",
+          "edit"
+        ],
+        "extend-video": [
+          "before",
+          "after"
+        ]
+      }
+    },
+    "seedance-2.0": {
+      "id": "dreamina-seedance-2-0-260128",
+      "kind": "video",
+      "resolutions": [
+        "480p",
+        "720p",
+        "1080p",
+        "4k"
+      ],
+      "max_duration": 15,
+      "limits": {
+        "image": 9,
+        "video": 3,
+        "audio": 3
+      },
+      "formats": [
+        "mp4"
+      ],
+      "operations": [
+        "text-to-video",
+        "image-to-video",
+        "reference-to-video",
+        "extend-video"
+      ],
+      "modes": {
+        "image-to-video": [
+          "first-frame",
+          "first-last-frame"
+        ],
+        "reference-to-video": [
+          "reference",
+          "edit"
+        ],
+        "extend-video": [
+          "before",
+          "after"
+        ]
+      }
+    },
+    "seedance-2.0-fast": {
+      "id": "dreamina-seedance-2-0-fast-260128",
+      "kind": "video",
+      "resolutions": [
+        "480p",
+        "720p"
+      ],
+      "max_duration": 15,
+      "limits": {
+        "image": 9,
+        "video": 3,
+        "audio": 3
+      },
+      "formats": [
+        "mp4"
+      ],
+      "operations": [
+        "text-to-video",
+        "image-to-video",
+        "reference-to-video",
+        "extend-video"
+      ],
+      "modes": {
+        "image-to-video": [
+          "first-frame",
+          "first-last-frame"
+        ],
+        "reference-to-video": [
+          "reference",
+          "edit"
+        ],
+        "extend-video": [
+          "before",
+          "after"
+        ]
+      }
+    },
+    "seedance-2.0-mini": {
+      "id": "dreamina-seedance-2-0-mini-260615",
+      "kind": "video",
+      "resolutions": [
+        "480p",
+        "720p"
+      ],
+      "max_duration": 15,
+      "limits": {
+        "image": 9,
+        "video": 3,
+        "audio": 3
+      },
+      "formats": [
+        "mp4"
+      ],
+      "operations": [
+        "text-to-video",
+        "image-to-video",
+        "reference-to-video",
+        "extend-video"
+      ],
+      "modes": {
+        "image-to-video": [
+          "first-frame",
+          "first-last-frame"
+        ],
+        "reference-to-video": [
+          "reference",
+          "edit"
+        ],
+        "extend-video": [
+          "before",
+          "after"
+        ]
+      }
+    },
+    "seedream-5.0-pro": {
+      "id": "dola-seedream-5-0-pro-260628",
+      "kind": "image",
+      "sizes": [
+        "1K",
+        "1.5K",
+        "2K"
+      ],
+      "formats": [
+        "png",
+        "jpeg"
+      ],
+      "max_images": 10,
+      "operations": [
+        "text-to-image",
+        "image-to-image",
+        "decompose-layers"
+      ],
+      "modes": {}
+    },
+    "seedream-5.0-flash": {
+      "id": "dola-seedream-5-0-flash-260915",
+      "kind": "image",
+      "sizes": [
+        "1K",
+        "1.5K",
+        "2K"
+      ],
+      "formats": [
+        "png",
+        "jpeg"
+      ],
+      "max_images": 10,
+      "operations": [
+        "text-to-image",
+        "image-to-image",
+        "decompose-layers"
+      ],
+      "modes": {}
+    }
+  }
+}
