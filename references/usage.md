@@ -16,7 +16,7 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 | `models [--provider volcengine或byteplus]` | 可选供应商标识 | 返回本地模型目录；不验证账户是否有调用权限 |
 | `check` | 无 | 只读检查项目配置、供应商密钥是否已配置、汇率和依赖 |
 | `doctor [--dependencies或--exchange-rate]` | 可选修复范围 | 修复依赖或汇率后重新检查 |
-| `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存所选供应商的 `cost.json`，并返回完整结果 |
+| `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，并返回完整结果 |
 | `submit --workdir "$WORK" --approval-text '用户实际确认原文'` | 标准输入中的任务 JSON；也可用 `--request` 指定文件 | 提交一次生成请求，返回 `submission` 路径 |
 | `status --submission "$SUBMISSION"` | 已有提交文件路径 | 文生图仅返回本地执行状态，不向供应商查询，也不恢复未知结果 |
 | `download --submission "$SUBMISSION"` | 已有提交文件路径 | 下载图片，更新提交文件内的结果清单 |
@@ -48,13 +48,13 @@ python3 "$SKILL/scripts/media.py" init <<'JSON'
 <完整 JSON 对象，不含注释> 
 JSON
 
-# 返回如下结果，将实际返回路径设置为 `$WORK` 并在后续复用。
-{"workdir": "/tmp/richmedia-20261022153000"}  
+# 将本次初始化返回的实际路径设置为 `$WORK`；重新理解意图后初始化会返回新的工作目录。
+{"workdir": "/tmp/richmedia-creator-xxxxxx"}
 ```
 
 ## 成本计算
 
-接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `estimate-cost`分别估价。估价结果将保存到 `$WORK/<供应商>/cost.json`，同时返回标准输出。
+接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `estimate-cost`分别估价。脚本将各供应商报价分别保存到当前 `$WORK` 下的 `{供应商}-priceing.json`，例如 `volcengine-priceing.json`、`byteplus-priceing.json`，并返回结果。记录返回的工作目录及报价文件路径，不自行选择目录或覆盖其他需求的记录。
 
 ```bash
 python3 "$SKILL/scripts/media.py" estimate-cost --workdir "$WORK" <<'JSON'
@@ -98,7 +98,7 @@ JSON
 }
 ```
 
-接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `submit` 完成任务提交，返回 `submission` 路径，该文件保存着任务 JSON 及结果清单。
+选择并确认供应商后，将上述完整任务 JSON 保存为当前 `$WORK` 下的 `payload.json`。脚本为每次提交分别保存 `submit-NNN.json`，包含本次实际请求及结果清单，并返回 `submission` 路径。NNN 从 `001` 开始递增。
 
 ```bash
 # --approval-text` 必须记录真实回复。费用上界未知时，只有用户明确接受该不确定性后才能加 `--accept-uncertain-cost`。
@@ -108,11 +108,11 @@ python3 "$SKILL/scripts/media.py" submit --workdir "$WORK" --approval-text '<用
 <已确认的完整任务 JSON，不含注释>
 JSON
 
-# 方案 2，将 JSON 保存到 `$WORK/task-spec.json` 后提交：
-python3 "$SKILL/scripts/media.py" submit --workdir "$WORK" --approval-text '<用户实际确认原文>' --request "$WORK/task-spec.json"
+# 方案 2，将脚本返回的 payload.json 实际绝对路径记为 `$PAYLOAD` 后提交：
+python3 "$SKILL/scripts/media.py" submit --workdir "$WORK" --approval-text '<用户实际确认原文>' --request "$PAYLOAD"
 
 # 返回如下结果
-{"submission": "/tmp/richmedia-20261022153000/submit-001.json"}
+{"submission": "/tmp/richmedia-creator-xxxxxx/submit-001.json"}
 ```
 
 ## 查看执行状态
@@ -129,21 +129,27 @@ python3 "$SKILL/scripts/media.py" status --submission "$SUBMISSION" --wait 600
 
 ## 下载结果
 
-图片保存在 `$WORK/outputs/submit-NNN/`。URL 结果通过 HTTPS 下载；`b64_json` 结果由脚本解码保存。清单写入原提交文件的 `result.files`，包含本地路径、SHA256 及供应商来源信息。
+输出保存在当前 `$WORK` 下的 `output-NNN/`，与本次 `submit-NNN.json` 使用同一提交序号，以脚本返回的文件清单为准。URL 结果通过 HTTPS 下载；`b64_json` 结果由脚本解码保存。清单写入原提交文件的 `result.files`，包含本地路径、SHA256 及供应商来源信息。
 
 ```bash
 python3 "$SKILL/scripts/media.py" download --submission "$SUBMISSION"
 ```
 
+## 最终文件交付
+
+下载并核验完成后，只将最终媒体复制到启动本技能时的当前项目目录；图层拆分同时复制位置元数据。保留临时目录中的请求、报价、提交记录和下载文件，不复制过程文件。例如启动目录是 `/project`，则按脚本返回的文件清单将最终文件复制到 `/project`，并提供交付文件的绝对路径链接或预览；同名文件使用不冲突的名称，避免覆盖。
+
 ## 运行文件及失败处理
+
+以下是脚本管理的目录结构示意；每次重新理解意图对应一个新的 `$WORK`，`NNN` 对应该工作目录内的提交序号。实际访问使用脚本返回的路径，不由大模型按此表构造路径。
 
 | 路径 | 内容 |
 |---|---|
-| `$WORK/request.json` | 初始化的原始需求记录 |
-| `$WORK/<供应商>/cost.json` | 各供应商的成本输入、计算过程和报价 |
-| `$WORK/task-spec.json` | 可选：已确认的提交请求；也可直接用标准输入 |
-| `$WORK/submit-NNN.json` | 原始提交输入、`response`、`execution` 执行状态与 `result` 下载清单 |
-| `$WORK/outputs/submit-NNN/` | 对应提交的下载文件及下载中的临时文件 |
+| `$WORK/request.json` | 当前需求的原始输入和需求记录；每个工作目录各有一个 |
+| `$WORK/{供应商}-priceing.json` | 当前需求对应供应商的成本输入、计算过程和报价 |
+| `$WORK/payload.json` | 选择并确认供应商后保存的完整提交请求 |
+| `$WORK/submit-NNN.json` | 本次实际提交输入、`response`、`execution` 执行状态与 `result` 下载清单 |
+| `$WORK/output-NNN/*` | 本次提交的下载文件及下载中的临时文件 |
 
 以下状态名来自提交文件的 `execution.state`；`status` 命令只返回 `success` 和 `error`。
 
