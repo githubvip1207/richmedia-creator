@@ -81,14 +81,16 @@ JSON
 
 ## 提交生成
 
-任务 JSON 使用 `provider`、`operation`、`original_prompt` 和原生 `payload`，其中模型、最终提示词及生成参数全部放在 `payload` 内，不使用顶层 `model`、`prompt`、`parameters` 或 `assets`。以下为结构示例，实际参数及完整字段注释以供应商文生图章节为准：
+任务 JSON 使用 `provider`、`operation`、`original_prompt` 和 `payload`。`payload` 按供应商 API 所需的字段和格式组织，但不一定是完整请求体；Python 脚本可能新增或修改字段，例如读取素材并进行 Base64 编码后填入请求。具体处理逻辑以 Python 脚本为准。
+
+以下为结构示例，实际输入字段以对应供应商能力章节为准：
 
 ```jsonc
 {
   "provider": "volcengine", // 必需：用户选中的供应商
   "operation": "text-to-image", // 必需：当前能力
   "original_prompt": "生成一张正方形熊猫图片", // 流程记录：用户原始提示词
-  "payload": { // 必需：供应商原生请求体，脚本校验后原样提交。python 脚本可能会根据供应商文档自动添加或修改字段。
+  "payload": { // 必需：按供应商 API 字段格式组织的请求参数；Python 脚本可能补充或修改字段
     "model": "doubao-seedream-5-0-flash-260915", // 必需：该供应商的准确模型 ID
     "prompt": "一只熊猫坐在草坡上，柔和自然光，写实摄影，不添加文字。构图比例偏好：1:1。", // 必需：最终确认的提示词
     ...  // 模型所需的其他参数
