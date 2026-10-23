@@ -192,9 +192,9 @@ BytePlus 使用独立美元价目表；有有效汇率时仅采用脚本返回�
      }
    }
    ```
-2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 scripts/media.py submit` 提交生成任务。使用当前工作目录 `$WORK` 作为 `--workdir`。已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。工作目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
-3. **判断生成结果：** 调用 `python3 scripts/media.py status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
-4. **下载或保存图片：** 调用 `python3 scripts/media.py download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
+2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 "$SKILL/scripts/media.py" submit` 提交生成任务。使用本次任务文件目录 `$WORK` 作为 `--workdir`。已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。任务文件目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
+3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/media.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
+4. **下载或保存图片：** 调用 `python3 "$SKILL/scripts/media.py" download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
 
 
 ## 图片输出规格

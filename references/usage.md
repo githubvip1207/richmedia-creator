@@ -2,7 +2,7 @@
 
 ## 当前适用范围
 
-本手册用于解释支持的脚本功能和脚本运行指南。所有脚本必须在包含 `.env` 文件的目录运行命令，且要求 Python 3.9 及以上。将 `SKILL` 设置为实际安装目录：
+本手册用于解释支持的脚本功能和脚本运行指南。所有脚本必须在包含 `.env` 文件的目录运行命令，且要求 Python 3.9 及以上。所有命令始终在启动本技能时的项目目录运行；`$WORK` 是任务文件目录，通过参数传入，不切换到该目录运行命令。将 `SKILL` 设置为实际安装目录：
 
 ```bash
 SKILL="$HOME/.codex/skills/richmedia-creator"
@@ -12,7 +12,7 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 
 | 命令 | 输入 | 输出与用途 |
 |---|---|---|
-| `init` | 标准输入中的需求 JSON 对象 | 创建临时工作目录、构造 `request.json` 文件，返回 `workdir` |
+| `init` | 标准输入中的需求 JSON 对象 | 创建临时任务文件目录、构造 `request.json` 文件，返回 `workdir` |
 | `models [--provider volcengine或byteplus]` | 可选供应商标识 | 返回本地模型目录；不验证账户是否有调用权限 |
 | `check` | 无 | 只读检查项目配置、供应商密钥是否已配置、汇率和依赖 |
 | `doctor [--dependencies或--exchange-rate]` | 可选修复范围 | 修复依赖或汇率后重新检查 |
@@ -48,13 +48,13 @@ python3 "$SKILL/scripts/media.py" init <<'JSON'
 <完整 JSON 对象，不含注释> 
 JSON
 
-# 将本次初始化返回的实际路径设置为 `$WORK`；重新理解意图后初始化会返回新的工作目录。
+# 将本次初始化返回的实际路径设置为 `$WORK`；重新理解意图后初始化会返回新的任务文件目录。
 {"workdir": "/tmp/richmedia-creator-xxxxxx"}
 ```
 
 ## 成本计算
 
-接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `estimate-cost`分别估价。脚本将各供应商报价分别保存到当前 `$WORK` 下的 `{供应商}-priceing.json`，例如 `volcengine-priceing.json`、`byteplus-priceing.json`，并返回结果。记录返回的工作目录及报价文件路径，不自行选择目录或覆盖其他需求的记录。
+接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `estimate-cost`分别估价。脚本将各供应商报价分别保存到当前 `$WORK` 下的 `{供应商}-priceing.json`，例如 `volcengine-priceing.json`、`byteplus-priceing.json`，并返回结果。记录返回的任务文件目录及报价文件路径，不自行选择目录或覆盖其他需求的记录。
 
 ```bash
 python3 "$SKILL/scripts/media.py" estimate-cost --workdir "$WORK" <<'JSON'
@@ -141,11 +141,11 @@ python3 "$SKILL/scripts/media.py" download --submission "$SUBMISSION"
 
 ## 运行文件及失败处理
 
-以下是脚本管理的目录结构示意；每次重新理解意图对应一个新的 `$WORK`，`NNN` 对应该工作目录内的提交序号。实际访问使用脚本返回的路径，不由大模型按此表构造路径。
+以下是脚本管理的目录结构示意；每次重新理解意图对应一个新的 `$WORK`，`NNN` 对应该任务文件目录内的提交序号。实际访问使用脚本返回的路径，不由大模型按此表构造路径。
 
 | 路径 | 内容 |
 |---|---|
-| `$WORK/request.json` | 当前需求的原始输入和需求记录；每个工作目录各有一个 |
+| `$WORK/request.json` | 当前需求的原始输入和需求记录；每个任务文件目录各有一个 |
 | `$WORK/{供应商}-priceing.json` | 当前需求对应供应商的成本输入、计算过程和报价 |
 | `$WORK/payload.json` | 选择并确认供应商后保存的完整提交请求 |
 | `$WORK/submit-NNN.json` | 本次实际提交输入、`response`、`execution` 执行状态与 `result` 下载清单 |
