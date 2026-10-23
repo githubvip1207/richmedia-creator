@@ -53,7 +53,7 @@ class SevenOperations(unittest.TestCase):
         self.assertEqual(quote['calculation']['operation'],'image-to-image')
         self.assertNotIn('mode',quote['calculation'])
         changed=copy.deepcopy(spec);changed['parameters']['size']='2K'
-        with self.assertRaisesRegex(ValueError,'differs'):
+        with self.assertRaisesRegex(ValueError,'Only basic text-to-image'):
             consume_quote(as_native(changed),quote)
 
     def test_reference_modes_control_native_video_task_type(self):
@@ -88,21 +88,10 @@ class SevenOperations(unittest.TestCase):
                 compile_request({**spec,'assets':[asset('image') for _ in range(count)]})
 
     def test_image_to_image_no_mode_reaches_provider_unchanged(self):
-        import tempfile
         from unittest.mock import patch
-        from core import submission_store as store
-        from config_fixture import config_fixture
+        from core.request import compile_request as compile_native
         from providers import volcengine
-        spec={'provider':'volcengine','model':'seedream-5.0-flash','operation':'image-to-image',
-              'prompt':'保留产品，换成灰色背景','parameters':{'size':'1K','ratio':'1:1'},
-              'assets':[asset('image')]}
-        with tempfile.TemporaryDirectory() as tmp:
-            work=Path(tmp);(work/'volcengine').mkdir()
-            spec = save_with_cost(spec, work)
-            with config_fixture({'VOLCENGINE_API_KEY':'fixture-only'}), \
-                    patch.object(volcengine,'request',return_value={'data':[{'url':'https://example.com/result.png'}]}) as post:
-                submit_command.submit(work,spec,'TEST CONFIRMATION')
-            payload=post.call_args.args[2]
-            self.assertEqual(payload['image'],spec['payload']['image'])
-            self.assertNotIn('mode',payload)
-            self.assertEqual(payload['prompt'],spec['payload']['prompt'])
+        spec = {'provider': 'volcengine', 'operation': 'image-to-image', 'payload': {}}
+        with patch.object(volcengine, 'request') as post, self.assertRaisesRegex(ValueError, 'Only basic text-to-image'):
+            compile_native(spec)
+        post.assert_not_called()

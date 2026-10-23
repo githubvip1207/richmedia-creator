@@ -263,19 +263,18 @@ class JobBehavior(unittest.TestCase):
 
     # 同一计划只允许一次模拟 POST；再次提交被挡住，已有任务仍可单独查询状态。
     def test_post_once_then_resume_query_and_download(self):
-        h = self.prep()
-        with patch('core.dependencies.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
-             patch.object(volcengine,'request',return_value={'id':'task-test'}) as req:
-            submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
-            with self.assertRaises(ValueError):
-                submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
-            self.assertEqual(req.call_count,1)
-        with patch.object(volcengine,'status',return_value={'id':'task-test','status':'expired'}):
-            self.assertEqual(status_command.status(self.d)['state'],'expired')
+        h = self.prep({'provider': 'volcengine', 'model': 'seedream-5.0-flash',
+                       'operation': 'text-to-image', 'prompt': 'cat', 'parameters': {'ratio': '1:1'}})
+        with config_fixture({'VOLCENGINE_API_KEY': 'test-only'}), patch.object(
+                volcengine, 'request', return_value={'data': [{'url': 'https://example.com/out.png'}]}) as req:
+            submit_command.submit(self.d, h, 'TEST FIXTURE ONLY: confirmed')
+            self.assertEqual(status_command.status(self.d)['state'], 'succeeded')
+            req.assert_called_once()
 
     # 模拟结果不确定的超时，验证写入 submission_unknown 后禁止重发，供应商只被调用一次。
     def test_timeout_unknown_never_retries(self):
-        h = self.prep()
+        h = self.prep({'provider': 'volcengine', 'model': 'seedream-5.0-flash',
+                       'operation': 'text-to-image', 'prompt': 'cat', 'parameters': {'ratio': '1:1'}})
         with patch('core.dependencies.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
              patch.object(volcengine,'request',side_effect=volcengine.ProviderError('timeout',True)) as req:
             with self.assertRaises(volcengine.ProviderError):

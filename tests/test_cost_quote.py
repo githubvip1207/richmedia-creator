@@ -90,27 +90,13 @@ class IndependentCosts(unittest.TestCase):
 
     def test_cli_multiple_input_videos_and_unknown_floor(self):
         args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]
-        import os
-        tool = self.root/'ffprobe'
-        tool.write_text('#!'+sys.executable+'\nimport json,sys\n' +
-                        'print(json.dumps({"streams":[{"codec_type":"video","width":1280,"height":720,"duration":3 if sys.argv[-1].endswith("a.mp4") else 5}]}))\n')
-        tool.chmod(0o700)
-        for name in ('a.mp4', 'b.mp4'):
-            (self.root/name).touch()
-        inputs = {'provider': 'volcengine', 'model': 'seedance-2.0', 'operation': 'reference-to-video', 'mode': 'edit',
-                  'resolution': '480p', 'ratio': '16:9', 'duration': 4,
-                  'assets': [{'kind': 'video', 'source': str(self.root/name)} for name in ('a.mp4','b.mp4')]}
-        result = subprocess.run(args, cwd=self.root, capture_output=True, text=True, input=json.dumps(inputs),
-                                env={**os.environ, 'PATH': str(self.root)+os.pathsep+os.environ.get('PATH','')})
-        self.assertEqual(result.returncode, 0, result.stderr)
-        data = store.read(self.root/'volcengine-priceing.json')
-        self.assertEqual(data['input'], inputs)
-        self.assertEqual(data['calculation']['input_video_seconds'], [3.0, 5.0])
-        self.assertEqual({k: json.loads(result.stdout)[k] for k in ('input','calculation','result')}, data)
-        self.assertEqual(Path(json.loads(result.stdout)['quote']).resolve(), (self.root/'volcengine-priceing.json').resolve())
-        self.assertEqual(data['calculation']['total_input_video_seconds'], 8)
-        self.assertEqual(data['result']['status'], 'lower_bound')
-        self.assertIsNone(list(data['result']['amount'].values())[1])
+        for provider in ('volcengine', 'byteplus'):
+            inputs = {'provider': provider, 'model': 'seedance-2.0', 'operation': 'text-to-video',
+                      'resolution': '480p', 'ratio': '16:9', 'duration': 4}
+            result = subprocess.run(args, cwd=self.root, capture_output=True, text=True, input=json.dumps(inputs))
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('Only basic text-to-image', result.stderr)
+            self.assertFalse((self.root/(provider + '-priceing.json')).exists())
 
     def test_stdin_invalid_json_creates_no_cost_file(self):
         args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]

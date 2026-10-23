@@ -1,7 +1,10 @@
 """download: retrieve existing output media with resumable local manifests."""
 import base64
 import http.client
+import json
 import os
+import shutil
+import subprocess
 import time
 import urllib.request
 import urllib.error
@@ -12,12 +15,33 @@ from core.assets import sha256_file
 from providers import get_provider
 
 
-def valid_media(path, kind):
+def valid_media(path, kind, expected_size=None):
     with open(path,'rb') as f:
         head = f.read(32)
     if kind == 'video':
         return len(head)>8 and head[4:8] == b'ftyp'
-    return head.startswith((b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')) or (head.startswith(b'RIFF') and head[8:12]==b'WEBP')
+    if not (head.startswith((b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')) or
+            (head.startswith(b'RIFF') and head[8:12] == b'WEBP')):
+        return False
+    probe = shutil.which('ffprobe')
+    require(probe is not None, 'ffprobe is required to validate downloaded images')
+    try:
+        result = subprocess.run(
+            [probe, '-v', 'error', '-select_streams', 'v:0', '-show_streams',
+             '-show_frames', '-of', 'json', str(path)],
+            capture_output=True, text=True, timeout=30)
+        data = json.loads(result.stdout)
+        if expected_size and 'x' in expected_size:
+            width, height = map(int, expected_size.split('x'))
+            if not any(s.get('width') == width and s.get('height') == height
+                       for s in data.get('streams', [])):
+                return False
+        return (result.returncode == 0 and not result.stderr.strip()
+                and any(s.get('width', 0) > 0 and s.get('height', 0) > 0
+                        for s in data.get('streams', []))
+                and bool(data.get('frames')))
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
+        return False
 
 
 def download_url(url, destination):
@@ -92,6 +116,9 @@ def download(submission):
             if kind == 'image' and entry.get('z_index',0) > 0:
                 fmt = 'png'
             require(fmt in ('png','jpeg','mp4','mov'), 'Unexpected output format')
+            if plan['compiled'].get('operation') == 'text-to-image':
+                require(fmt == plan['compiled']['parameters']['output_format'],
+                        'Provider image format differs from confirmed format')
             name = ('%02d-' % i) + entry.get('label','image') + '.' + fmt
             path = output/name
             # 清单哈希与磁盘内容一致才跳过下载，不能仅凭文件名存在就假定完整。
@@ -105,8 +132,18 @@ def download(submission):
                     url = entry.get('url','')
                     require(url.startswith('https://'), 'Output URL must be HTTPS')
                     download_url(url, tmp)
-                require(valid_media(tmp,kind), 'Downloaded content is not expected media; retained .part for inspection')
-                os.replace(str(tmp),str(path))
+            else:
+                tmp = path
+            require(valid_media(tmp, kind, plan['compiled']['parameters'].get('size')),
+                    'Downloaded content is not valid media; retained file for inspection')
+            if kind == 'image':
+                with tmp.open('rb') as stream:
+                    signature = stream.read(8)
+                require((fmt == 'png' and signature == b'\x89PNG\r\n\x1a\n')
+                        or (fmt == 'jpeg' and signature.startswith(b'\xff\xd8\xff')),
+                        'Downloaded image format differs from confirmed format')
+            if tmp != path:
+                os.replace(str(tmp), str(path))
             # 清单保留供应商、模型、任务、原始图层元数据和哈希；剔除庞大 Base64 正文。
             manifest.append({'path':str(path),'sha256':sha256_file(path),'kind':kind,
                              'origin':{k:v for k,v in entry.items() if k != 'b64_json'},

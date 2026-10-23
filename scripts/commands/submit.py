@@ -7,9 +7,10 @@ from core.cost_quote import consume_quote
 from core.cost_record import amount_in
 from core.envfile import config_value
 from core.dependencies import require_dependencies
+from core.operations import require_supported_operation
 from core.submission_store import read, write, lock, prior_submission, next_submit_record, now
 from providers import get_provider
-from providers.transport import ProviderError
+from providers.transport import ProviderError, response_error, sanitize_response
 
 
 def validate_requirement(directory, spec, compiled):
@@ -60,6 +61,7 @@ def submit(jobdir, spec, approval_text, accept_uncertain=False):
         prior_submission(d)
         require(isinstance(spec,dict) and bool(spec.get('provider')), 'Select an explicit supplier in the task request')
         get_provider(spec['provider'])
+        require_supported_operation(spec)
         cost = read(d/(spec['provider'] + '-priceing.json'))
         spec, compiled, pricing, estimate = consume_quote(spec,cost)
         for unit in ('cny','usd'):
@@ -93,10 +95,10 @@ def submit(jobdir, spec, approval_text, accept_uncertain=False):
             # The only paid network action in this module; exactly one POST, never retried.
             endpoint = '/images/generations' if plan['compiled']['kind'] == 'image' else '/contents/generations/tasks'
             result = adapter.request('POST',endpoint,payload)
+            result = sanitize_response(result, secrets=(compiled['prompt'],))
             record['response'] = result
             write(record_path, record)
             if result.get('error'):
-                from providers.transport import response_error
                 raise response_error(result['error'], provider_name=info['name'], secrets=(compiled['prompt'],))
             # 视频响应只代表任务已创建，进入 queued；图片响应为同步结果，但仍逐项检查错误。
             if plan['compiled']['kind'] == 'video':
@@ -104,7 +106,12 @@ def submit(jobdir, spec, approval_text, accept_uncertain=False):
                 state.update(state='queued',task_id=result['id'])
             else:
                 require(isinstance(result.get('data'),list) and bool(result['data']), 'Image response missing output data')
-                from providers.transport import response_error
+                require(all(isinstance(x, dict) for x in result['data']), 'Invalid image result entry')
+                require(all(x.get('error') or isinstance(x.get('url'), str) and x['url'].startswith('https://')
+                            or isinstance(x.get('b64_json'), str) and bool(x['b64_json']) for x in result['data']),
+                        'Image result missing usable output')
+                outputs = [x for x in result['data'] if not x.get('error')]
+                require(len(outputs) <= compiled['quantity'], 'Image output count differs from confirmed quantity')
                 errors = [response_error(x['error'], secrets=(compiled['prompt'],)).details
                           for x in result['data'] if x.get('error')]
                 image_state = 'failed' if len(errors) == len(result['data']) else ('partial_failed' if errors else 'succeeded')

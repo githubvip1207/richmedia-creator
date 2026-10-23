@@ -55,7 +55,8 @@ class ImageLifecycle(unittest.TestCase):
         state = self.submit([{'url':'https://example.com/one.png'}])
         record_path = state['submission']
         def save(url,path):
-            path.write_bytes(b'\x89PNG\r\n\x1a\n'+b'fixture')
+            from test_runtime import png
+            path.write_bytes(png())
         with patch.object(download_command, 'download_url',side_effect=save):
             result = download_command.download(record_path)
         path = Path(result['files'][0]['path'])

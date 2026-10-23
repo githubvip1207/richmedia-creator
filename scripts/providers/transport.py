@@ -38,12 +38,23 @@ def response_error(error, *, http_status=None, request_id='', provider_name='Pro
     error = error if isinstance(error, dict) else {'message': error}
     details = {'code': sanitized(error.get('code', 'unknown'), secrets),
                'message': sanitized(error.get('message', 'Provider returned no error message'), secrets),
-               'request_id': sanitized(request_id, secrets)}
+               'request_id': sanitized(request_id or error.get('request_id', ''), secrets)}
     if http_status is not None:
         details['http_status'] = http_status
     prefix = provider_name + (' HTTP ' + str(http_status) if http_status is not None else ' error')
     message = prefix + '; code=' + details['code'] + '; message=' + details['message'] + '; request_id=' + details['request_id']
     return ProviderError(message, uncertain=is_submission and http_status is not None and (http_status >= 500 or http_status in (408, 429)), details=details)
+
+
+def sanitize_response(result, *, secrets=()):
+    """Preserve successful media fields; replace all provider error objects."""
+    if isinstance(result, list):
+        return [sanitize_response(item, secrets=secrets) for item in result]
+    if not isinstance(result, dict):
+        return result
+    return {key: (response_error(value, secrets=secrets).details
+                  if key == 'error' and value else sanitize_response(value, secrets=secrets))
+            for key, value in result.items()}
 
 
 # 禁止认证请求重定向，避免 Authorization 请求头被转发至其他主机。

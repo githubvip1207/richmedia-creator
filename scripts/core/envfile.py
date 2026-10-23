@@ -1,6 +1,7 @@
 """项目 .env 配置及汇率有效期；不执行文件，不读取业务环境变量。"""
 import datetime as dt
 import math
+import re
 from pathlib import Path
 
 ALLOWED = {'VOLCENGINE_API_KEY', 'BYTEPLUS_API_KEY', 'USD_CNY', 'USD_CNY_EXPIRES_AT'}
@@ -29,10 +30,14 @@ def read_config(directory=None):
         key, value = key.strip(), value.strip()
         if key not in ALLOWED:
             continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
-            value = value[1:-1]
-        elif ' #' in value:
-            value = value.split(' #', 1)[0].rstrip()
+        if value.startswith(('"', "'")):
+            quote = value[0]
+            end = value.find(quote, 1)
+            if end < 0 or (value[end + 1:].strip() and not value[end + 1:].lstrip().startswith('#')):
+                raise ValueError('Invalid quoted .env value for ' + key)
+            value = value[1:end]
+        else:
+            value = re.split(r'\s+#', value, maxsplit=1)[0].rstrip()
         values[key] = value
     return values
 

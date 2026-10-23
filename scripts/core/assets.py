@@ -70,7 +70,9 @@ def inspect_asset(asset):
         if result.returncode:
             raise ValueError('ffprobe could not decode local asset: ' + path.name)
         probe = json.loads(result.stdout)
-        stream = next((s for s in probe.get('streams', []) if s.get('codec_type') == a['kind']), {})
+        stream = next((s for s in probe.get('streams', []) if s.get('codec_type') == ('video' if a['kind'] == 'image' else a['kind'])), {})
+        if not stream:
+            raise ValueError('ffprobe found no matching media stream: ' + path.name)
         for k in ('width', 'height'):
             if k in stream:
                 a['metadata'][k] = stream[k]

@@ -24,3 +24,9 @@ def internal_operation(spec):
     if mode is not None:
         raise ValueError(operation + ' does not accept mode')
     return operation
+
+
+def require_supported_operation(spec):
+    """Public execution and estimation share the same capability boundary."""
+    if spec.get('operation') != 'text-to-image':
+        raise ValueError('Only basic text-to-image is currently implemented for Volcengine and BytePlus')

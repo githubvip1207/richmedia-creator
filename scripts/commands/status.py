@@ -4,7 +4,7 @@ import time
 from core.request import require
 from core.submission_store import read, write, lock, submission_path, now
 from providers import get_provider
-from providers.transport import ProviderError
+from providers.transport import ProviderError, sanitize_response
 
 
 def status_result(state):
@@ -69,6 +69,7 @@ def query_submission(record, path, adapter, task_id, timeout=None):
         query['error'] = str(exc) if isinstance(exc, ProviderError) else type(exc).__name__
         write(path, record)
         raise
+    query['response'] = sanitize_response(query['response'], secrets=(record['execution']['compiled'].get('prompt', ''),))
     write(path, record)
     return query['response']
 

@@ -18,14 +18,13 @@ class SubmissionRecord(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.work = Path(self.tmp.name)
-        (self.work/'volcengine').mkdir()
-        self.spec = video()
-        self.spec = save_with_cost(self.spec, self.work)
-        with config_fixture({'VOLCENGINE_API_KEY':'fixture-only'}), \
-                patch('core.dependencies.skill_status', return_value={'status':'ok'}), \
-                patch.object(volcengine, 'request', return_value={'id':'task-fixture'}):
-            state = submit_command.submit(self.work, self.spec, 'TEST CONFIRMATION')
-        self.record = Path(state['submission'])
+        legacy = video()
+        from core.legacy_request import compile_request
+        self.spec = save_with_cost(legacy, self.work)
+        self.record = self.work/'submit-001.json'
+        store.write(self.record, {**self.spec, 'response': {'id': 'task-fixture'},
+                                 'execution': {'state': 'queued', 'task_id': 'task-fixture',
+                                               'compiled': compile_request(legacy)}})
 
     def test_polling_keeps_post_response_and_each_get_then_downloads_from_record(self):
         running = {'id':'task-fixture','status':'running'}

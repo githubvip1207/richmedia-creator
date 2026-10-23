@@ -87,10 +87,11 @@ class FormulaDependencies(unittest.TestCase):
                 'optimizer':{'skill':'sd25-pe','status':'applied'},
                 'assets':[{**inputs['assets'][0],'purpose':'首帧','role':'first_frame',
                            'metadata':self.measure(inputs['assets'][0])['metadata']}]}
-        self.assertEqual(consume_quote(as_native(spec),quote)[3],quote['result'])
+        with self.assertRaisesRegex(ValueError, 'Only basic text-to-image'):
+            consume_quote(as_native(spec), quote)
         changed = copy.deepcopy(spec)
         changed['estimate_context'] = {'output_dimensions':[640,640]}
-        with self.assertRaisesRegex(ValueError,'differs'):
+        with self.assertRaisesRegex(ValueError,'Only basic text-to-image'):
             consume_quote(as_native(changed),quote)
 
     def test_edit_target_and_floor_range_resolve_all_formula_dependencies(self):
@@ -137,27 +138,12 @@ class FormulaDependencies(unittest.TestCase):
 
     def test_cli_resolves_adaptive_dimensions_and_verified_floor_evidence(self):
         import json
-        import os
         import subprocess
         import tempfile
         from core.request import ROOT
         with tempfile.TemporaryDirectory() as tmp:
-            work=Path(tmp)
-            tool=work/'ffprobe'
-            tool.write_text('#!'+sys.executable+'\nimport json\nprint(json.dumps({"streams":[{"codec_type":"video","width":1280,"height":720,"duration":"8"}]}))\n')
-            tool.chmod(0o700)
-            source=work/'source.mp4';source.touch()
-            data={**self.base,'operation':'reference-to-video', 'mode': 'edit','ratio':'adaptive','duration':-1,
-                  'assets':[{'kind':'video','source':str(source)}],
-                  'estimate_context':{'minimum_billable_tokens':[100000,200000],
-                                      'minimum_tokens_source':'https://docs.volcengine.com/test-fixture'}}
-            run=subprocess.run([sys.executable,str(ROOT/'scripts/main.py'),'estimate-cost','--workdir',str(work)],
-                               input=json.dumps(data),capture_output=True,text=True,cwd=work,
-                               env={**os.environ,'PATH':str(work)+os.pathsep+os.environ.get('PATH','')})
-            self.assertEqual(run.returncode,0,run.stderr)
-            quote=json.loads(run.stdout)
-            self.assertEqual({k: quote[k] for k in ('input','calculation','result')},json.loads((work/'volcengine-priceing.json').read_text()))
-            self.assertEqual(quote['input'],data)
-            self.assertEqual(quote['calculation']['assumed_output_dimensions'],[854,480])
-            self.assertEqual(quote['calculation']['assumed_output_duration'],[7.6,8])
-            self.assertEqual(list(quote['result']['amount'].values()),[round(math.ceil((8+7.6)*854*480*24/1024)*42/1_000_000,6),8.4])
+            run = subprocess.run([sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', tmp],
+                                 input=json.dumps(self.base), capture_output=True, text=True, cwd=tmp)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertIn('Only basic text-to-image', run.stderr)
+            self.assertFalse((Path(tmp)/'volcengine-priceing.json').exists())
