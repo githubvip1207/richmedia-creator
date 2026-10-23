@@ -4,12 +4,14 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+from commands import submit as submit_command
 from core.operations import OPERATIONS, internal_operation
-from core.request import CATALOGS, compile_request
-from core.costing import consume_quote
-from cost_fixture import calculate
-from core.cost_assets import calculate_asset_inputs
-from test_media import video, asset
+from core.request import CATALOGS
+from core.legacy_request import compile_request
+from core.cost_quote import consume_quote
+from cost_fixture import calculate, as_native, save_with_cost
+from core.media_probe import calculate_asset_inputs
+from test_runtime import video, asset
 
 
 class SevenOperations(unittest.TestCase):
@@ -52,7 +54,7 @@ class SevenOperations(unittest.TestCase):
         self.assertNotIn('mode',quote['calculation'])
         changed=copy.deepcopy(spec);changed['parameters']['size']='2K'
         with self.assertRaisesRegex(ValueError,'differs'):
-            consume_quote(changed,quote)
+            consume_quote(as_native(changed),quote)
 
     def test_reference_modes_control_native_video_task_type(self):
         for mode,task_type in [('reference','reference'),('edit','edit')]:
@@ -88,7 +90,7 @@ class SevenOperations(unittest.TestCase):
     def test_image_to_image_no_mode_reaches_provider_unchanged(self):
         import tempfile
         from unittest.mock import patch
-        from core import jobs
+        from core import submission_store as store
         from config_fixture import config_fixture
         from providers import volcengine
         spec={'provider':'volcengine','model':'seedream-5.0-flash','operation':'image-to-image',
@@ -96,11 +98,11 @@ class SevenOperations(unittest.TestCase):
               'assets':[asset('image')]}
         with tempfile.TemporaryDirectory() as tmp:
             work=Path(tmp);(work/'volcengine').mkdir()
-            jobs.write(work/'volcengine/cost.json',calculate(spec))
+            spec = save_with_cost(spec, work)
             with config_fixture({'VOLCENGINE_API_KEY':'fixture-only'}), \
                     patch.object(volcengine,'request',return_value={'data':[{'url':'https://example.com/result.png'}]}) as post:
-                jobs.submit(work,spec,'TEST CONFIRMATION')
+                submit_command.submit(work,spec,'TEST CONFIRMATION')
             payload=post.call_args.args[2]
-            self.assertEqual(payload['image'],[spec['assets'][0]['source']])
+            self.assertEqual(payload['image'],spec['payload']['image'])
             self.assertNotIn('mode',payload)
-            self.assertEqual(payload['prompt'].split('\n')[0],spec['prompt'])
+            self.assertEqual(payload['prompt'],spec['payload']['prompt'])

@@ -14,7 +14,7 @@ description: 生成和编辑图片与视频。图片支持文字生成、参考�
 
 ```bash
 SKILL="$HOME/.codex/skills/richmedia-creator"
-python3 "$SKILL/scripts/media.py" check
+python3 "$SKILL/scripts/main.py" check
 ```
 
 发现异常时，按下表“异常处理”方案处理。所有命令均在启动本技能时的项目目录运行，以便读取该目录的 `.env`；`$WORK` 仅用于保存本次任务文件，通过 `--workdir` 等参数传入，不切换到该目录运行命令。
@@ -27,8 +27,8 @@ python3 "$SKILL/scripts/media.py" check
 |---|------|---|
 | `BYTEPLUS_API_KEY` | 使用 BytePlus 时所需的 API 密钥 | 缺失时忽略该供应商 |
 | `VOLCENGINE_API_KEY` | 使用 Volcengine 时所需的 API 密钥 | 缺失时忽略该供应商 |
-| `USD_CNY` | 美元兑人民币汇率，表示 1 美元对应的人民币金额 | 缺失时使用 `python3 "$SKILL/scripts/media.py" doctor --exchange-rate` 更新，或仅展示原币报价 |
-| `USD_CNY_EXPIRES_AT` | 汇率过期时间，格式为 ISO 8601 | 缺失或过期时，使用 `python3 "$SKILL/scripts/media.py" doctor --exchange-rate` 更新，或仅展示原币报价 |        
+| `USD_CNY` | 美元兑人民币汇率，表示 1 美元对应的人民币金额 | 缺失时使用 `python3 "$SKILL/scripts/main.py" doctor --exchange-rate` 更新，或仅展示原币报价 |
+| `USD_CNY_EXPIRES_AT` | 汇率过期时间，格式为 ISO 8601 | 缺失或过期时，使用 `python3 "$SKILL/scripts/main.py" doctor --exchange-rate` 更新，或仅展示原币报价 |        
 
 ### 依赖检查
 
@@ -36,8 +36,8 @@ python3 "$SKILL/scripts/media.py" check
 
 | 依赖项 | 用途 | 异常处理 |
 |---|------|---|
-| `sd25-pe` | 提示词优化技能 | 缺失时使用命令 `python3 "$SKILL/scripts/media.py" doctor --dependencies` 安装，安装失败则停止本次任务 |
-| `ffprobe` | 读取图片、视频和音频的尺寸、时长、编码等媒体信息 | 缺失时使用命令 `python3 "$SKILL/scripts/media.py" doctor --dependencies` 安装，安装失败则停止本次任务 |
+| `sd25-pe` | 提示词优化技能 | 缺失时使用命令 `python3 "$SKILL/scripts/main.py" doctor --dependencies` 安装，安装失败则停止本次任务 |
+| `ffprobe` | 读取图片、视频和音频的尺寸、时长、编码等媒体信息 | 缺失时使用命令 `python3 "$SKILL/scripts/main.py" doctor --dependencies` 安装，安装失败则停止本次任务 |
 
 ## 工作流程
 
@@ -85,7 +85,7 @@ python3 "$SKILL/scripts/media.py" check
 
 ### 3. 初始化任务
 
-根据前两步的信息组织以下 JSON，调用 `python3 "$SKILL/scripts/media.py" init` 初始化任务，将返回的 `workdir`（`$WORK`）作为本次需求的任务文件目录，供后续命令通过参数引用。
+根据前两步的信息组织以下 JSON，调用 `python3 "$SKILL/scripts/main.py" init` 初始化任务，将返回的 `workdir`（`$WORK`）作为本次需求的任务文件目录，供后续命令通过参数引用。
 
 ```jsonc
 {
@@ -120,7 +120,7 @@ python3 "$SKILL/scripts/media.py" check
 
 ### 4. 预估成本
 
-仅对已配置凭证且能够满足前述已确定生产要求的候选供应商估价；用户指定供应商时只估算该家。依次读取其“预估成本”规则，根据前三步的信息组织 JSON 内容，并通过 `python3 "$SKILL/scripts/media.py" estimate-cost` 命令分别预估成本。各供应商报价均须满足用户已确定的需求，但可以采用不同模型。确认单分别列明每家供应商采用的模型及版本、输出规格、费用和影响选择的限制，让用户确认具体供应商方案。原币及有效汇率换算以命令返回结果为准。
+仅对已配置凭证且能够满足前述已确定生产要求的候选供应商估价；用户指定供应商时只估算该家。依次读取其“预估成本”规则，根据前三步的信息组织 JSON 内容，并通过 `python3 "$SKILL/scripts/main.py" estimate-cost` 命令分别预估成本。各供应商报价均须满足用户已确定的需求，但可以采用不同模型。确认单分别列明每家供应商采用的模型及版本、输出规格、费用和影响选择的限制，让用户确认具体供应商方案。原币及有效汇率换算以命令返回结果为准。
 
 | 供应商 | 预估成本规则 |
 |---|---|

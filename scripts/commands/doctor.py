@@ -1,4 +1,4 @@
-"""只读 check 与可定向修复的 doctor；不执行任何媒体生成请求。"""
+"""doctor: repair dependencies or the project's exchange-rate configuration."""
 import datetime as dt
 import json
 import os
@@ -8,40 +8,9 @@ import tempfile
 import urllib.request
 import urllib.error
 from pathlib import Path
-from .envfile import read_config, load_project_env, fx_state, FX_URL
-from . import jobs
-from providers import PROVIDERS
-
-
-def skill_status():
-    """安装判定不仅要求路径存在，还要能读取且内容非空。"""
-    for path in jobs.dependency_paths():
-        try:
-            if path.is_file() and path.read_text(encoding='utf-8').strip():
-                return {'status': 'ok', 'path': str(path)}
-        except (OSError, UnicodeError):
-            continue
-    return {'status': 'missing', 'action': 'Run doctor --dependencies'}
-
-
-def check():
-    values = read_config()
-    suppliers = []
-    issues = []
-    for name, info in PROVIDERS.items():
-        key = info['adapter'].KEY_ENV
-        if values.get(key):
-            suppliers.append({'id': name, 'name': info['name']})
-        else:
-            issues.append({'item': key, 'status': 'missing', 'action': 'Configure this API key locally in .env to enable the supplier'})
-    return {
-        'configuration': {'file': load_project_env(), 'status': 'ok' if load_project_env() else 'missing',
-                          'suppliers': suppliers, 'issues': issues, 'exchange_rate': fx_state()},
-        'dependencies': {'sd25_pe': skill_status(), 'ffprobe':
-                         {'status': 'ok', 'path': shutil.which('ffprobe')} if shutil.which('ffprobe') else
-                         {'status': 'missing', 'action': 'Run doctor --dependencies; required only for tasks needing media inspection'}},
-        'network_checked': False,
-    }
+from core.envfile import fx_state, FX_URL
+from core import dependencies
+from .check import check
 
 
 def run_installer(command):
@@ -55,13 +24,13 @@ def run_installer(command):
 
 def repair_dependencies():
     results = []
-    if skill_status()['status'] != 'ok':
+    if dependencies.skill_status()['status'] != 'ok':
         if not shutil.which('npx'):
             results.append({'item': 'sd25-pe', 'status': 'failed', 'reason': 'npx is unavailable; install Node.js/npm first'})
         else:
             ok = run_installer(['npx', '--yes', 'skills@latest', 'add', 'https://arkdocs.tos-cn-beijing.volces.com/skills/',
                                 '--skill', 'sd25-pe', '--global', '--yes'])
-            results.append({'item': 'sd25-pe', 'status': 'repaired' if ok and skill_status()['status'] == 'ok' else 'failed'})
+            results.append({'item': 'sd25-pe', 'status': 'repaired' if ok and dependencies.skill_status()['status'] == 'ok' else 'failed'})
     if not shutil.which('ffprobe'):
         if not shutil.which('brew'):
             results.append({'item': 'ffprobe', 'status': 'failed', 'reason': 'Homebrew is unavailable; install FFmpeg using your system package manager'})
@@ -119,7 +88,7 @@ def save_exchange_rate(rate, expiry):
 
 def update_exchange_rate():
     """固定使用 ECB 数据源的 USD/CNY；缓存有效期为数据日期 UTC 零点起七天。"""
-    from .envfile import validate_fx
+    from core.envfile import validate_fx
     # 显式客户端标识与 JSON 接收类型，避免默认 Python 标识被公开接口网关拒绝。
     request = urllib.request.Request(FX_URL, headers={'User-Agent': 'RichMedia-Creator/1.0', 'Accept': 'application/json'})
     with urllib.request.urlopen(request, timeout=25) as response:
@@ -150,3 +119,7 @@ def doctor(dependencies=False, exchange_rate=False):
     report = check()
     return {'repairs': results, 'check': report,
             'note': 'Missing API keys must be supplied locally. No media generation was submitted.'}
+
+
+def run(args):
+    return doctor(args.dependencies, args.exchange_rate)

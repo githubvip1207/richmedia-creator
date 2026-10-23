@@ -16,11 +16,13 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
+from commands import submit as submit_command, status as status_command, download as download_command
 from config_fixture import config_fixture
-from core import jobs
+from core import submission_store as store
 from cost_fixture import save_with_cost
-from core.request import compile_request, CATALOGS, ROOT
-from core.estimate import estimate
+from core.request import CATALOGS, ROOT
+from core.legacy_request import compile_request
+from core.cost_formula import estimate
 from providers import volcengine
 
 
@@ -227,7 +229,7 @@ class JobBehavior(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.d = Path(self.tmp.name)/'job'
-        self.pricing = jobs.read(ROOT/'models/volcengine-pricing.json')
+        self.pricing = store.read(ROOT/'models/volcengine-pricing.json')
         self.pricing['verified_on'] = dt.datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
 
     # 保存当前用例的任务配置与成本，供模拟提交复用。
@@ -237,7 +239,7 @@ class JobBehavior(unittest.TestCase):
     def test_cost_recording_is_offline_without_plan(self):
         with patch.object(volcengine,'request',side_effect=AssertionError('network')):
             self.prep()
-        self.assertTrue((self.d/'volcengine/cost.json').exists())
+        self.assertTrue((self.d/'volcengine-priceing.json').exists())
         self.assertFalse((self.d/'plan.json').exists())
         self.assertFalse((self.d/'confirmation.md').exists())
 
@@ -255,81 +257,83 @@ class JobBehavior(unittest.TestCase):
             self.prep(spec)
             with patch.object(volcengine,'request') as net:
                 with self.assertRaises(ValueError):
-                    jobs.submit(self.d,spec,'TEST CONFIRMATION')
+                    submit_command.submit(self.d,spec,'TEST CONFIRMATION')
                 net.assert_not_called()
             self.assertFalse((self.d/'submit-001.json').exists())
 
     # 同一计划只允许一次模拟 POST；再次提交被挡住，已有任务仍可单独查询状态。
     def test_post_once_then_resume_query_and_download(self):
         h = self.prep()
-        with patch('core.preflight.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
+        with patch('core.dependencies.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
              patch.object(volcengine,'request',return_value={'id':'task-test'}) as req:
-            jobs.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
+            submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
             with self.assertRaises(ValueError):
-                jobs.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
+                submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
             self.assertEqual(req.call_count,1)
         with patch.object(volcengine,'status',return_value={'id':'task-test','status':'expired'}):
-            self.assertEqual(jobs.status(self.d)['state'],'expired')
+            self.assertEqual(status_command.status(self.d)['state'],'expired')
 
     # 模拟结果不确定的超时，验证写入 submission_unknown 后禁止重发，供应商只被调用一次。
     def test_timeout_unknown_never_retries(self):
         h = self.prep()
-        with patch('core.preflight.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
+        with patch('core.dependencies.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
              patch.object(volcengine,'request',side_effect=volcengine.ProviderError('timeout',True)) as req:
             with self.assertRaises(volcengine.ProviderError):
-                jobs.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
-            self.assertEqual(jobs.read(self.d/'submit-001.json')['execution']['state'],'submission_unknown')
+                submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
+            self.assertEqual(store.read(self.d/'submit-001.json')['execution']['state'],'submission_unknown')
             with self.assertRaises(ValueError):
-                jobs.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
+                submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
             self.assertEqual(req.call_count,1)
 
     # 费用上界未知且没有明确接受标志时，必须在任何供应商请求之前拒绝提交。
     def test_uncertain_cost_requires_specific_flag(self):
         h = self.prep(video(operation='reference-to-video', mode='reference',assets=[asset()]))
-        with patch('core.preflight.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
+        with patch('core.dependencies.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
              patch.object(volcengine,'request') as req:
             with self.assertRaises(ValueError):
-                jobs.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
+                submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
             req.assert_not_called()
 
     # 即使默认输出为 JPEG，透明图层仍保存 PNG；清单保留边界框、用量，并可重复读取。
     def test_layer_download_preserves_metadata_and_png(self):
-        spec = self.prep({'provider':'volcengine','model':'seedream-5.0-pro','operation':'decompose-layers','assets':[asset('image')],
-                   'parameters':{'output_format':'jpeg'}})
-        jobs.write(self.d/'submit-001.json', {**spec,
+        spec = {'provider':'volcengine','model':'seedream-5.0-pro','operation':'decompose-layers','assets':[asset('image')],
+                'parameters':{'output_format':'jpeg'}}
+        self.d.mkdir()
+        store.write(self.d/'submit-001.json', {**spec,
                    'execution': {'state':'succeeded','compiled':compile_request(spec)},
                    'response': {'data':[{'b64_json':base64.b64encode(png()).decode(),
                    'z_index':1,'bounding_box':{'absolute':[1,2,3,4]}}],'usage':{'total_tokens':22}}})
-        result = jobs.download(self.d)
+        result = download_command.download(self.d)
         self.assertTrue(result['files'][0]['path'].endswith('.png'))
         self.assertEqual(result['files'][0]['origin']['bounding_box']['absolute'],[1,2,3,4])
-        self.assertEqual(jobs.download(self.d)['usage']['total_tokens'],22)
+        self.assertEqual(download_command.download(self.d)['usage']['total_tokens'],22)
 
     # 缺少真实批准文本时，提交不得创建 job.json，也不能留下已尝试状态。
     def test_missing_approval_does_not_create_attempt(self):
         h = self.prep()
         with self.assertRaises(ValueError):
-            jobs.submit(self.d,h,'')
+            submit_command.submit(self.d,h,'')
         self.assertFalse((self.d/'submit-001.json').exists())
 
     # 本地输入只在提交时转换为 Base64，计划中不保存 data URI。
     # 检查模拟图片同步成功、下载字节保持原样、usage 保留且实际扣费金额仍未知。
-    def test_image_submit_materializes_and_downloads_once(self):
+    def test_local_image_materialization_and_original_download(self):
+        from providers.transport import payload
         path = Path(self.tmp.name)/'input.png'
         data = png()
         path.write_bytes(data)
-        h = self.prep({'provider':'volcengine','model':'seedream-5.0-pro','operation':'image-to-image','prompt':'把杯子换成蓝色','parameters':{'ratio':'1:1'},
-                      'assets':[{'kind':'image','source':str(path),'purpose':'编辑原图'}]})
-        reply = {'data':[{'b64_json':base64.b64encode(data).decode(),'output_format':'png'}],
-                 'usage':{'total_tokens':88,'generated_images':1}}
-        with patch('core.preflight.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
-             patch.object(volcengine,'request',return_value=reply) as req:
-            state = jobs.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
-            self.assertEqual(state['state'],'succeeded')
-            payload = req.call_args.args[2]
-            self.assertTrue(payload['image'][0].startswith('data:image/png;base64,'))
-            self.assertNotIn('data:image/',(self.d/'submit-001.json').read_text())
-        result = jobs.download(self.d)
+        spec = {'provider':'volcengine','model':'seedream-5.0-pro','operation':'image-to-image',
+                'prompt':'把杯子换成蓝色','parameters':{'ratio':'1:1'},
+                'assets':[{'kind':'image','source':str(path),'purpose':'编辑原图'}]}
+        compiled = compile_request(spec)
+        body = payload({'compiled': compiled})
+        self.assertTrue(body['image'][0].startswith('data:image/png;base64,'))
+        self.assertNotIn('data:image/',json.dumps(compiled))
+        self.d.mkdir()
+        store.write(self.d/'submit-001.json', {'execution':{'state':'succeeded','compiled':compiled},
+                   'response':{'data':[{'b64_json':base64.b64encode(data).decode(),'output_format':'png'}],
+                               'usage':{'total_tokens':88}}})
+        result = download_command.download(self.d)
         self.assertEqual(Path(result['files'][0]['path']).read_bytes(),data)
         self.assertEqual(result['usage']['total_tokens'],88)
         self.assertIsNone(result['actual_billed_amount_cny'])

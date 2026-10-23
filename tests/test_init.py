@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from core import workspace
+from commands import init as init_command
 
 
 class FrozenDateTime(dt.datetime):
@@ -24,14 +24,14 @@ class WorkspaceTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
-        for patcher in (patch.object(workspace, 'WORK_ROOT', self.root),
-                        patch.object(workspace.dt, 'datetime', FrozenDateTime)):
+        for patcher in (patch.object(init_command, 'WORK_ROOT', self.root),
+                        patch.object(init_command.dt, 'datetime', FrozenDateTime)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
     def test_private_directory_and_request_use_local_clock(self):
         with patch('urllib.request.OpenerDirector.open') as network, patch('subprocess.run') as command:
-            result = workspace.initialize('{"original_prompt":"测试需求"}')
+            result = init_command.initialize('{"original_prompt":"测试需求"}')
         directory = Path(result['workdir'])
         self.assertEqual(directory.name, 'richmedia-20261022163045')
         self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
@@ -44,12 +44,12 @@ class WorkspaceTests(unittest.TestCase):
         command.assert_not_called()
 
     def test_collision_keeps_existing_run_and_uses_new_timestamp(self):
-        first = workspace.initialize('{"original_prompt":"测试需求"}')
+        first = init_command.initialize('{"original_prompt":"测试需求"}')
         request = Path(first['workdir']) / 'request.json'
         request.write_text('existing user requirements')
         # A symlink collision must also be skipped without following it.
         (self.root / 'richmedia-20261022163046').symlink_to(Path(first['workdir']), target_is_directory=True)
-        second = workspace.initialize('{"original_prompt":"测试需求"}')
+        second = init_command.initialize('{"original_prompt":"测试需求"}')
         self.assertEqual(Path(second['workdir']).name, 'richmedia-20261022163047')
         self.assertEqual(request.read_text(), 'existing user requirements')
         self.assertEqual(json.loads((Path(second['workdir']) / 'request.json').read_text()), {'original_prompt':'测试需求'})
@@ -57,25 +57,25 @@ class WorkspaceTests(unittest.TestCase):
     def test_invalid_input_does_not_create_directory(self):
         for content in ('', 'not json', '[]', 'null', '{"amount":NaN}'):
             with self.assertRaises(ValueError):
-                workspace.initialize(content)
+                init_command.initialize(content)
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_failed_write_removes_incomplete_run(self):
-        with patch.object(workspace.os, 'open', side_effect=PermissionError('denied')):
+        with patch.object(init_command.os, 'open', side_effect=PermissionError('denied')):
             with self.assertRaises(PermissionError):
-                workspace.initialize('{}')
+                init_command.initialize('{}')
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_filesystem_failure_is_reported_without_creating_request(self):
         with patch.object(Path, 'mkdir', side_effect=PermissionError('denied')):
             with self.assertRaises(PermissionError):
-                workspace.initialize('{"original_prompt":"测试需求"}')
+                init_command.initialize('{"original_prompt":"测试需求"}')
         self.assertEqual(list(self.root.iterdir()), [])
 
 
 class InitCommandTests(unittest.TestCase):
     def test_cli_saves_stdin_without_credentials(self):
-        cli = Path(__file__).resolve().parents[1] / 'scripts' / 'media.py'
+        cli = Path(__file__).resolve().parents[1] / 'scripts' / 'main.py'
         with tempfile.TemporaryDirectory() as project:
             result = subprocess.run([sys.executable, str(cli), 'init'],
                                     cwd=project, input='{"original_prompt":"测试\n需求"}'.replace("\n", "\\n"), capture_output=True, text=True)

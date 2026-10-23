@@ -6,15 +6,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from core.cost_assets import calculate_asset_inputs
-from core.costing import consume_quote
+from core.media_probe import calculate_asset_inputs
+from cost_fixture import as_native
+from core.cost_quote import consume_quote
 
 
 class FormulaDependencies(unittest.TestCase):
     def setUp(self):
         self.base = {'provider':'volcengine','model':'seedance-2.5','operation':'text-to-video',
                      'resolution':'480p','ratio':'16:9','duration':4}
-        self.probe = self.enterContext(patch('core.cost_assets.probe_asset', side_effect=self.measure))
+        self.probe = self.enterContext(patch('core.media_probe.probe_asset', side_effect=self.measure))
 
     def measure(self, asset):
         source = asset['source']
@@ -86,11 +87,11 @@ class FormulaDependencies(unittest.TestCase):
                 'optimizer':{'skill':'sd25-pe','status':'applied'},
                 'assets':[{**inputs['assets'][0],'purpose':'首帧','role':'first_frame',
                            'metadata':self.measure(inputs['assets'][0])['metadata']}]}
-        self.assertEqual(consume_quote(spec,quote)[3],quote['result'])
+        self.assertEqual(consume_quote(as_native(spec),quote)[3],quote['result'])
         changed = copy.deepcopy(spec)
         changed['estimate_context'] = {'output_dimensions':[640,640]}
         with self.assertRaisesRegex(ValueError,'differs'):
-            consume_quote(changed,quote)
+            consume_quote(as_native(changed),quote)
 
     def test_edit_target_and_floor_range_resolve_all_formula_dependencies(self):
         assets=[self.asset('video'),self.asset('video','portrait-long')]
@@ -150,12 +151,12 @@ class FormulaDependencies(unittest.TestCase):
                   'assets':[{'kind':'video','source':str(source)}],
                   'estimate_context':{'minimum_billable_tokens':[100000,200000],
                                       'minimum_tokens_source':'https://docs.volcengine.com/test-fixture'}}
-            run=subprocess.run([sys.executable,str(ROOT/'scripts/media.py'),'estimate-cost','--workdir',str(work)],
+            run=subprocess.run([sys.executable,str(ROOT/'scripts/main.py'),'estimate-cost','--workdir',str(work)],
                                input=json.dumps(data),capture_output=True,text=True,cwd=work,
                                env={**os.environ,'PATH':str(work)+os.pathsep+os.environ.get('PATH','')})
             self.assertEqual(run.returncode,0,run.stderr)
             quote=json.loads(run.stdout)
-            self.assertEqual(quote,json.loads((work/'volcengine/cost.json').read_text()))
+            self.assertEqual({k: quote[k] for k in ('input','calculation','result')},json.loads((work/'volcengine-priceing.json').read_text()))
             self.assertEqual(quote['input'],data)
             self.assertEqual(quote['calculation']['assumed_output_dimensions'],[854,480])
             self.assertEqual(quote['calculation']['assumed_output_duration'],[7.6,8])

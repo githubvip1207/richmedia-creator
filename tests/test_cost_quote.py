@@ -9,9 +9,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from core import jobs
-from core.costing import consume_quote
-from cost_fixture import calculate
+from core import submission_store as store
+from core.cost_quote import consume_quote
+from cost_fixture import calculate, as_native
 from core.request import ROOT
 
 
@@ -29,8 +29,8 @@ class IndependentCosts(unittest.TestCase):
 
     def test_consume_saved_cost_without_recalculation(self):
         spec=image();quote=calculate(spec)
-        with patch('core.costing.estimate',side_effect=AssertionError('Unexpected calculation')):
-            self.assertEqual(consume_quote(spec,quote)[3],quote['result'])
+        with patch('core.cost_quote.estimate',side_effect=AssertionError('Unexpected calculation')):
+            self.assertEqual(consume_quote(as_native(spec),quote)[3],quote['result'])
         self.assertNotIn('quote_hash',quote)
         self.assertNotIn('catalog_hash',quote)
 
@@ -40,12 +40,12 @@ class IndependentCosts(unittest.TestCase):
                        {'provider':'byteplus'}, {'estimate_context':{'output_dimensions':[854,480]}}):
             changed=copy.deepcopy(spec);changed.update(update)
             with self.assertRaisesRegex(ValueError,'differs'):
-                consume_quote(changed,quote)
+                consume_quote(as_native(changed),quote)
 
     def test_reject_expired_quote(self):
         quote=calculate(image());quote['calculation']['created_at']='2020-01-01T00:00:00+00:00'
         with self.assertRaisesRegex(ValueError,'expired'):
-            consume_quote(image(),quote)
+            consume_quote(as_native(image()),quote)
 
     def test_video_formula_and_missing_floor(self):
         spec = {'provider': 'volcengine', 'model': 'seedance-2.5', 'operation': 'text-to-video',
@@ -68,27 +68,28 @@ class IndependentCosts(unittest.TestCase):
             if success:
                 self.assertEqual(r.returncode, 0, r.stderr)
             return r
-        cost = self.root/'volcengine/cost.json'
+        cost = self.root/'volcengine-priceing.json'
         inputs = {'provider': 'volcengine', 'model': 'seedream-5.0-flash',
                   'operation': 'text-to-image', 'size': '1K'}
-        result = run('media.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
-        data = jobs.read(cost)
-        self.assertEqual(json.loads(result.stdout), data)
+        result = run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        data = store.read(cost)
+        self.assertEqual({k: json.loads(result.stdout)[k] for k in ('input','calculation','result')}, data)
+        self.assertEqual(Path(json.loads(result.stdout)['quote']).resolve(), cost.resolve())
         self.assertEqual(data['input'], inputs)
         self.assertEqual(data['result']['currency'], 'CNY')
         self.assertNotIn('prompt', data['input'])
         # The fixed output filename is updated when inputs change.
         inputs['size'] = '2K'
-        run('media.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
-        self.assertEqual(jobs.read(cost)['input']['size'], '2K')
+        run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        self.assertEqual(store.read(cost)['input']['size'], '2K')
         inputs['size'] = '1K'
-        run('media.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
         inputs['provider'] = 'byteplus'
-        run('media.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
-        self.assertEqual(jobs.read(self.root/'byteplus/cost.json')['result']['currency'], 'USD')
+        run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        self.assertEqual(store.read(self.root/'byteplus-priceing.json')['result']['currency'], 'USD')
 
     def test_cli_multiple_input_videos_and_unknown_floor(self):
-        args = [sys.executable, str(ROOT/'scripts/media.py'), 'estimate-cost', '--workdir', str(self.root)]
+        args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]
         import os
         tool = self.root/'ffprobe'
         tool.write_text('#!'+sys.executable+'\nimport json,sys\n' +
@@ -102,21 +103,22 @@ class IndependentCosts(unittest.TestCase):
         result = subprocess.run(args, cwd=self.root, capture_output=True, text=True, input=json.dumps(inputs),
                                 env={**os.environ, 'PATH': str(self.root)+os.pathsep+os.environ.get('PATH','')})
         self.assertEqual(result.returncode, 0, result.stderr)
-        data = jobs.read(self.root/'volcengine/cost.json')
+        data = store.read(self.root/'volcengine-priceing.json')
         self.assertEqual(data['input'], inputs)
         self.assertEqual(data['calculation']['input_video_seconds'], [3.0, 5.0])
-        self.assertEqual(json.loads(result.stdout), data)
+        self.assertEqual({k: json.loads(result.stdout)[k] for k in ('input','calculation','result')}, data)
+        self.assertEqual(Path(json.loads(result.stdout)['quote']).resolve(), (self.root/'volcengine-priceing.json').resolve())
         self.assertEqual(data['calculation']['total_input_video_seconds'], 8)
         self.assertEqual(data['result']['status'], 'lower_bound')
         self.assertIsNone(list(data['result']['amount'].values())[1])
 
     def test_stdin_invalid_json_creates_no_cost_file(self):
-        args = [sys.executable, str(ROOT/'scripts/media.py'), 'estimate-cost', '--workdir', str(self.root)]
+        args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]
         for raw in ['', '{', '[]', '{"provider":"volcengine","model":"seedream-5.0-flash","operation":"text-to-image","size":"1K","input_images":NaN}',
                     '{"provider":"volcengine","model":"seedream-5.0-flash","operation":"text-to-image","size":"1K","typo":1}']:
             result = subprocess.run(args, cwd=self.root, capture_output=True, text=True, input=raw)
             self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((self.root/'volcengine/cost.json').exists())
+            self.assertFalse((self.root/'volcengine-priceing.json').exists())
 
 
 if __name__ == '__main__':

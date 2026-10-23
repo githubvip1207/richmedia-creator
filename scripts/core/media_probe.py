@@ -27,7 +27,7 @@ def probe_asset(asset):
         require(path.is_absolute() and path.is_file(),
                 'Use an existing absolute media path or HTTPS URL; asset IDs need an accessible original source')
     probe = shutil.which('ffprobe')
-    require(probe is not None, 'ffprobe is required to inspect cost assets; run media.py doctor --dependencies')
+    require(probe is not None, 'ffprobe is required to inspect cost assets; run main.py doctor --dependencies')
     try:
         result = subprocess.run([probe, '-v', 'error', '-protocol_whitelist', 'file,http,https,tcp,tls',
                                  '-show_streams', '-show_format', '-of', 'json', source],
@@ -60,7 +60,7 @@ def probe_asset(asset):
 
 
 def calculate_asset_inputs(inputs, fx=None):
-    from .costing import calculate_inputs
+    from .cost_quote import calculate_inputs
     allowed = {'provider', 'model', 'operation', 'mode', 'size', 'resolution', 'ratio', 'duration', 'assets', 'estimate_context'}
     require(isinstance(inputs, dict), 'Cost input must be a JSON object')
     require(not (set(inputs) - allowed), 'Unknown cost input fields: '+str(sorted(set(inputs)-allowed)))

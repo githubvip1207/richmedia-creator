@@ -37,3 +37,9 @@ def initialize(content):
             directory.rmdir()
             raise
         return {'workdir': str(directory)}
+
+def run(args):
+    import sys
+    if sys.stdin.isatty():
+        raise ValueError('init requires request.json content through stdin')
+    return initialize(sys.stdin.read())

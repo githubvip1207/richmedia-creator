@@ -2,7 +2,7 @@
 import copy
 import datetime as dt
 from .request import compile_request, require, ROOT, CATALOGS, number
-from .estimate import estimate
+from .cost_formula import estimate
 from .cost_record import build_record
 from .operations import internal_operation
 from .envfile import validate_fx
@@ -93,22 +93,22 @@ def compile_cost_inputs(inputs, measured_assets=None):
 
 
 def calculate_inputs(inputs, pricing=None, context=None, fx=None, measured_assets=None):
-    from . import jobs
+    from . import submission_store as store
     compiled = compile_cost_inputs(inputs, measured_assets)
     info = get_provider(compiled['provider'])
-    pricing = pricing or jobs.read(ROOT/'models'/info['pricing'])
+    pricing = pricing or store.read(ROOT/'models'/info['pricing'])
     detail = estimate(compiled, context, pricing, fx)
-    return build_record(inputs, compiled, billing_inputs(compiled), pricing, detail, context, fx, jobs.now())
+    return build_record(inputs, compiled, billing_inputs(compiled), pricing, detail, context, fx, store.now())
 
 
 def consume_quote(spec, quote):
     """Reuse saved formula inputs and result, without loading or calculating new prices."""
     require(isinstance(quote, dict) and set(quote) == {'input', 'calculation', 'result'},
-            'Cost artifact format changed; run media.py estimate-cost again')
+            'Cost artifact format changed; run main.py estimate-cost again')
     calculation, result = quote['calculation'], quote['result']
-    require(calculation.get('schema_version') == 3, 'Cost artifact format changed; run media.py estimate-cost again')
+    require(calculation.get('schema_version') == 3, 'Cost artifact format changed; run main.py estimate-cost again')
     age = dt.datetime.now(dt.timezone.utc) - dt.datetime.fromisoformat(calculation['created_at'])
-    require(dt.timedelta(0) <= age <= dt.timedelta(hours=24), 'Cost artifact expired; run media.py estimate-cost again')
+    require(dt.timedelta(0) <= age <= dt.timedelta(hours=24), 'Cost artifact expired; run main.py estimate-cost again')
     s = copy.deepcopy(spec)
     if 'estimate_context' not in s and calculation.get('estimate_context') is not None:
         s['estimate_context'] = copy.deepcopy(calculation['estimate_context'])
@@ -121,7 +121,7 @@ def consume_quote(spec, quote):
     require(all(calculation.get(k) == v for k, v in billing.items())
             and s.get('estimate_context') == calculation.get('estimate_context')
             and s.get('fx') == calculation.get('fx'),
-            'Request differs from cost artifact; run media.py estimate-cost again')
+            'Request differs from cost artifact; run main.py estimate-cost again')
     info = get_provider(compiled['provider'])
     require(calculation['provider'] == compiled['provider'] and result['currency'] == info['currency'],
             'Cost artifact supplier mismatch')

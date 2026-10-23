@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from core.cost_assets import calculate_asset_inputs
+from core.media_probe import calculate_asset_inputs
 
 
 class CostAudit(unittest.TestCase):
@@ -18,7 +18,7 @@ class CostAudit(unittest.TestCase):
             if asset['kind'] == 'video':
                 metadata.update(width=1280, height=720, duration=8.0)
             return {**asset, 'metadata': metadata}
-        with patch('core.cost_assets.probe_asset', side_effect=measure):
+        with patch('core.media_probe.probe_asset', side_effect=measure):
             return calculate_asset_inputs(data, fx=fx)
 
     def test_image_audit_reconstructs_exact_pixel_and_extra_input_cost(self):

@@ -6,11 +6,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
+from commands import submit as submit_command, status as status_command, download as download_command
 from core.request import compile_request
-from core.costing import calculate_inputs, consume_quote
-from core import jobs
+from core.cost_quote import calculate_inputs, consume_quote
+from core import submission_store as store
 from providers import volcengine, transport
 from config_fixture import config_fixture
+from cost_fixture import save_requirement
 
 IMAGE = 'doubao-seedream-5-0-flash-260915'
 VIDEO = 'doubao-seedance-2-0-260128'
@@ -86,15 +88,16 @@ class NativeCapabilities(unittest.TestCase):
                 before = copy.deepcopy(spec)
                 work = Path(tmp)
                 (work/'volcengine').mkdir()
-                jobs.write(work/'volcengine/cost.json', quote_for(spec))
+                store.write(work/'volcengine-priceing.json', quote_for(spec))
+                save_requirement(spec, work, consume_quote(spec, quote_for(spec))[1])
                 response = {'data': [{'url': PIC}]} if 'image' in operation or operation == 'decompose-layers' else {'id': 'fixture-task'}
                 # image-to-video is a video operation despite containing the word image.
                 if operation == 'image-to-video':
                     response = {'id': 'fixture-task'}
                 with config_fixture({'VOLCENGINE_API_KEY': 'fixture-only'}), \
-                        patch('core.preflight.skill_status', return_value={'status': 'ok'}), \
+                        patch('core.dependencies.skill_status', return_value={'status': 'ok'}), \
                         patch.object(volcengine, 'request', return_value=response) as post:
-                    jobs.submit(work, spec, 'TEST CONFIRMATION', accept_uncertain=True)
+                    submit_command.submit(work, spec, 'TEST CONFIRMATION', accept_uncertain=True)
                 endpoint = '/images/generations' if operation in ('image-to-image', 'decompose-layers') else '/contents/generations/tasks'
                 post.assert_called_once_with('POST', endpoint, before['payload'])
                 self.assertEqual(spec, before)
@@ -140,17 +143,18 @@ class NativeCapabilities(unittest.TestCase):
         spec = fixture('extend-video', 'after')
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp); (work/'volcengine').mkdir()
-            jobs.write(work/'volcengine/cost.json', quote_for(spec))
+            store.write(work/'volcengine-priceing.json', quote_for(spec))
+            save_requirement(spec, work, consume_quote(spec, quote_for(spec))[1])
             with config_fixture({'VOLCENGINE_API_KEY': 'fixture-only'}), \
                     patch.object(volcengine, 'request', return_value={'id': 'fixture-task'}):
-                result = jobs.submit(work, spec, 'TEST CONFIRMATION', accept_uncertain=True)
+                result = submit_command.submit(work, spec, 'TEST CONFIRMATION', accept_uncertain=True)
             submission = result['submission']
             response = {'id': 'fixture-task', 'status': 'succeeded', 'content': {'video_url': 'https://example.com/out.mp4'}}
             with patch.object(volcengine, 'status', return_value=response):
-                jobs.status(submission)
-            with patch.object(jobs, 'download_url', side_effect=lambda url, path: path.write_bytes(b'\0\0\0\x18ftypisom' + b'\0'*24)):
-                downloaded = jobs.download(submission)
-            record = jobs.read(submission)
+                status_command.status(submission)
+            with patch.object(download_command, 'download_url', side_effect=lambda url, path: path.write_bytes(b'\0\0\0\x18ftypisom' + b'\0'*24)):
+                downloaded = download_command.download(submission)
+            record = store.read(submission)
             self.assertTrue(record['execution']['download_complete'])
             self.assertEqual(record['payload'], spec['payload'])
             self.assertEqual(record['response'], {'id': 'fixture-task'})
@@ -169,12 +173,13 @@ class NativeCapabilities(unittest.TestCase):
         spec = fixture('image-to-image')
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp); (work/'volcengine').mkdir()
-            jobs.write(work/'volcengine/cost.json', quote_for(spec))
+            store.write(work/'volcengine-priceing.json', quote_for(spec))
+            save_requirement(spec, work, consume_quote(spec, quote_for(spec))[1])
             with config_fixture({'VOLCENGINE_API_KEY': 'fixture-only'}), \
                     patch.object(volcengine, 'request', side_effect=TimeoutError()) as post:
                 with self.assertRaises(TimeoutError):
-                    jobs.submit(work, spec, 'TEST CONFIRMATION')
+                    submit_command.submit(work, spec, 'TEST CONFIRMATION')
                 with self.assertRaises(ValueError):
-                    jobs.submit(work, spec, 'TEST CONFIRMATION AGAIN')
+                    submit_command.submit(work, spec, 'TEST CONFIRMATION AGAIN')
                 self.assertEqual(post.call_count, 1)
-            self.assertEqual(jobs.read(work/'submit-001.json')['execution']['state'], 'submission_unknown')
+            self.assertEqual(store.read(work/'submit-001.json')['execution']['state'], 'submission_unknown')

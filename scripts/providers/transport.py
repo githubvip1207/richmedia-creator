@@ -12,9 +12,38 @@ from core.assets import materialize
 # 该标记指导恢复状态，不能凭错误就擅自进行下一次付费尝试。
 class ProviderError(RuntimeError):
     # 保留脱敏错误摘要与结果不确定性；不把完整 HTTP 响应正文写入异常。
-    def __init__(self, message, uncertain=False):
+    def __init__(self, message, uncertain=False, details=None):
         super().__init__(message)
         self.uncertain = uncertain
+        self.details = details
+
+
+def sanitized(value, secrets=()):
+    """Retain diagnostic text while removing keys, signed URLs and inline media."""
+    text = str(value).replace('\r', ' ').replace('\n', ' ')
+    for secret in secrets:
+        if isinstance(secret, str) and secret:
+            text = text.replace(secret, '<redacted>')
+    text = re.sub(r'data:[^\s]+', '<media>', text, flags=re.I)
+    text = re.sub(r'https?://[^\s<>]+', '<url>', text)
+    text = re.sub(r'(?i)(bearer\s+)[^\s,;]+', r'\1<redacted>', text)
+    text = re.sub(r'(?i)(api[_-]?key|token|password)(\s*[:=]\s*)[^\s,;]+',
+                  r'\1\2<redacted>', text)
+    return text[:500]
+
+
+def response_error(error, *, http_status=None, request_id='', provider_name='Provider', secrets=(), is_submission=False):
+    """Normalize both HTTP errors and a synchronous top-level error response."""
+    secrets = tuple(secrets) + tuple(config_value(k) for k in ('VOLCENGINE_API_KEY', 'BYTEPLUS_API_KEY'))
+    error = error if isinstance(error, dict) else {'message': error}
+    details = {'code': sanitized(error.get('code', 'unknown'), secrets),
+               'message': sanitized(error.get('message', 'Provider returned no error message'), secrets),
+               'request_id': sanitized(request_id, secrets)}
+    if http_status is not None:
+        details['http_status'] = http_status
+    prefix = provider_name + (' HTTP ' + str(http_status) if http_status is not None else ' error')
+    message = prefix + '; code=' + details['code'] + '; message=' + details['message'] + '; request_id=' + details['request_id']
+    return ProviderError(message, uncertain=is_submission and http_status is not None and (http_status >= 500 or http_status in (408, 429)), details=details)
 
 
 # 禁止认证请求重定向，避免 Authorization 请求头被转发至其他主机。
@@ -51,17 +80,21 @@ def request(base, key_env, provider_name, method, path, payload=None, *, timeout
         # 完整响应正文可能回显私有 URL 或输入参数，因此不保存或直接打印错误正文。
         # Do not print raw responses: provider errors can echo input URLs/payloads/secrets.
         rid = e.headers.get('X-Request-Id', '')
-        code = 'unknown'
+        error = {}
         try:
-            error = json.loads(e.read()).get('error', {})
-            code = str(error.get('code', 'unknown'))[:100]
+            body = json.loads(e.read())
+            error = body.get('error', {}) if isinstance(body, dict) else {}
         except (ValueError, AttributeError):
             pass
         finally:
             e.close()
-        # POST 的 5xx、408、429 保守标记为不确定；调用方据此保留恢复状态。
-        raise ProviderError('%s HTTP %s; code=%s; request_id=%s' % (provider_name, e.code, code, rid),
-                            uncertain=method == 'POST' and (e.code >= 500 or e.code in (408,429))) from None
+        # Never retain the raw body. Known request text is redacted if echoed by the API.
+        secrets = [key]
+        if isinstance(payload, dict):
+            secrets.append(payload.get('prompt'))
+            secrets.extend(item.get('text') for item in payload.get('content', []) if isinstance(item, dict))
+        raise response_error(error, http_status=e.code, request_id=rid,
+                             provider_name=provider_name, secrets=secrets, is_submission=method == 'POST') from None
     # 传输失败或非预期 JSON 响应不能证明生成未发生；POST 均按结果未知处理。
     except (OSError, ValueError) as e:
         detail = type(e).__name__

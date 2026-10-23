@@ -16,10 +16,27 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 | `models [--provider volcengine或byteplus]` | 可选供应商标识 | 返回本地模型目录；不验证账户是否有调用权限 |
 | `check` | 无 | 只读检查项目配置、供应商密钥是否已配置、汇率和依赖 |
 | `doctor [--dependencies或--exchange-rate]` | 可选修复范围 | 修复依赖或汇率后重新检查 |
-| `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，并返回完整结果 |
+| `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，返回 `workdir`、`quote` 及完整成本结果 |
 | `submit --workdir "$WORK" --approval-text '用户实际确认原文'` | 标准输入中的任务 JSON；也可用 `--request` 指定文件 | 提交一次生成请求，返回 `submission` 路径 |
 | `status --submission "$SUBMISSION"` | 已有提交文件路径 | 文生图仅返回本地执行状态，不向供应商查询，也不恢复未知结果 |
 | `download --submission "$SUBMISSION"` | 已有提交文件路径 | 下载图片，更新提交文件内的结果清单 |
+
+## 命令与文件对应
+
+统一入口为 `scripts/main.py`，负责参数解析、命令分发和 JSON 输出。每个命令的实现放在 `scripts/commands/` 的同名模块中；Python 模块名将命令中的连字符替换为下划线。
+
+| 命令 | 实现文件 |
+|---|---|
+| `init` | `scripts/commands/init.py` |
+| `models` | `scripts/commands/models.py` |
+| `check` | `scripts/commands/check.py` |
+| `doctor` | `scripts/commands/doctor.py` |
+| `estimate-cost` | `scripts/commands/estimate_cost.py` |
+| `submit` | `scripts/commands/submit.py` |
+| `status` | `scripts/commands/status.py` |
+| `download` | `scripts/commands/download.py` |
+
+`core/` 保存共用逻辑：`submission_store.py` 管理记录和锁，`dependencies.py` 检查依赖，`media_probe.py` 实测计费素材，`cost_quote.py` 组织及核对报价，`cost_formula.py` 计算费用。`providers/` 保存供应商适配和网络传输。命令均通过 `main.py` 调用，不直接执行模块文件。
 
 ## 配置与环境检查、修复
 
@@ -34,9 +51,9 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 
 
 ```bash
-python3 "$SKILL/scripts/media.py" check  # 不联网，不验证密钥有效性、模型权限、余额或额度。
-python3 "$SKILL/scripts/media.py" doctor --dependencies  # 尝试通过 npx 安装缺失的 sd25-pe、通过 Homebrew 安装提供 ffprobe 的 FFmpeg，安装工具缺失或修复失败时会报告。
-python3 "$SKILL/scripts/media.py" doctor --exchange-rate # 获取 USD/CNY，仅更新项目 `.env` 中两个汇率配置项。
+python3 "$SKILL/scripts/main.py" check  # 不联网，不验证密钥有效性、模型权限、余额或额度。
+python3 "$SKILL/scripts/main.py" doctor --dependencies  # 尝试通过 npx 安装缺失的 sd25-pe、通过 Homebrew 安装提供 ffprobe 的 FFmpeg，安装工具缺失或修复失败时会报告。
+python3 "$SKILL/scripts/main.py" doctor --exchange-rate # 获取 USD/CNY，仅更新项目 `.env` 中两个汇率配置项。
 ```
 
 ## 初始化与运行目录
@@ -44,7 +61,7 @@ python3 "$SKILL/scripts/media.py" doctor --exchange-rate # 获取 USD/CNY，仅�
 接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `init`：
 
 ```bash
-python3 "$SKILL/scripts/media.py" init <<'JSON'
+python3 "$SKILL/scripts/main.py" init <<'JSON'
 <完整 JSON 对象，不含注释> 
 JSON
 
@@ -54,15 +71,17 @@ JSON
 
 ## 成本计算
 
-接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `estimate-cost`分别估价。脚本将各供应商报价分别保存到当前 `$WORK` 下的 `{供应商}-priceing.json`，例如 `volcengine-priceing.json`、`byteplus-priceing.json`，并返回结果。记录返回的任务文件目录及报价文件路径，不自行选择目录或覆盖其他需求的记录。
+接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `estimate-cost`分别估价。脚本将各供应商报价分别保存到当前 `$WORK` 下的 `{供应商}-priceing.json`，例如 `volcengine-priceing.json`、`byteplus-priceing.json`，并返回 `workdir`、报价文件绝对路径 `quote` 及 `input`、`calculation`、`result`。记录返回的任务文件目录及报价文件路径，不自行选择目录或覆盖其他需求的记录。
 
 ```bash
-python3 "$SKILL/scripts/media.py" estimate-cost --workdir "$WORK" <<'JSON'
+python3 "$SKILL/scripts/main.py" estimate-cost --workdir "$WORK" <<'JSON'
 <完整 JSON 对象，不含注释> 
 JSON
 
 # 返回如下结果
 {
+    "workdir": "/tmp/richmedia-creator-xxxxxx",
+    "quote": "/tmp/richmedia-creator-xxxxxx/volcengine-priceing.json",
     "input": {},
     "calculation": {},
     "result": {
@@ -81,7 +100,7 @@ JSON
 
 ## 提交生成
 
-任务 JSON 使用 `provider`、`operation`、`original_prompt` 和 `payload`。`payload` 按供应商 API 所需的字段和格式组织，但不一定是完整请求体；Python 脚本可能新增或修改字段，例如读取素材并进行 Base64 编码后填入请求。具体处理逻辑以 Python 脚本为准。
+任务 JSON 使用 `provider`、`operation`、`original_prompt` 和 `payload`。`payload` 按供应商 API 所需的字段和格式组织。当前文生图要求显式提供 `size` 及能力指南规定的固定参数；脚本验证后原样提交，不追加提示词或套用供应商默认输出规格。
 
 以下为结构示例，实际输入字段以对应供应商能力章节为准：
 
@@ -98,18 +117,18 @@ JSON
 }
 ```
 
-选择并确认供应商后，将上述完整任务 JSON 保存为当前 `$WORK` 下的 `payload.json`。脚本为每次提交分别保存 `submit-NNN.json`，包含本次实际请求及结果清单，并返回 `submission` 路径。NNN 从 `001` 开始递增。
+选择并确认供应商后，提交上述完整任务 JSON。脚本在校验通过后将其保存为当前 `$WORK` 下的 `payload.json`；使用 `--request` 时由调用方先保存输入文件。提交只接受含供应商原生 `payload` 的格式，不接受旧版通用任务格式。提交前脚本核对 `request.json` 的原话、最终提示词、供应商方案及参数，并检查 `sd25-pe` 和 `ffprobe` 均已安装。脚本为每次提交分别保存 `submit-NNN.json`，包含本次实际请求及结果清单，并返回 `submission` 路径。NNN 从 `001` 开始递增。
 
 ```bash
 # --approval-text` 必须记录真实回复。费用上界未知时，只有用户明确接受该不确定性后才能加 `--accept-uncertain-cost`。
 
 # 方案 1，通过标准输入提交
-python3 "$SKILL/scripts/media.py" submit --workdir "$WORK" --approval-text '<用户实际确认原文>' <<'JSON'
+python3 "$SKILL/scripts/main.py" submit --workdir "$WORK" --approval-text '<用户实际确认原文>' <<'JSON'
 <已确认的完整任务 JSON，不含注释>
 JSON
 
-# 方案 2，将脚本返回的 payload.json 实际绝对路径记为 `$PAYLOAD` 后提交：
-python3 "$SKILL/scripts/media.py" submit --workdir "$WORK" --approval-text '<用户实际确认原文>' --request "$PAYLOAD"
+# 方案 2，将调用方已保存的任务 JSON 文件绝对路径记为 `$PAYLOAD` 后提交：
+python3 "$SKILL/scripts/main.py" submit --workdir "$WORK" --approval-text '<用户实际确认原文>' --request "$PAYLOAD"
 
 # 返回如下结果
 {"submission": "/tmp/richmedia-creator-xxxxxx/submit-001.json"}
@@ -121,7 +140,7 @@ python3 "$SKILL/scripts/media.py" submit --workdir "$WORK" --approval-text '<用
 
 ```bash
 # --wait 可选，取值 0～600 秒，默认 0；异步任务最多等待 10 分钟。
-python3 "$SKILL/scripts/media.py" status --submission "$SUBMISSION" --wait 600
+python3 "$SKILL/scripts/main.py" status --submission "$SUBMISSION" --wait 600
 
 # 返回如下结果
 {"success": true, "error": null}
@@ -132,7 +151,7 @@ python3 "$SKILL/scripts/media.py" status --submission "$SUBMISSION" --wait 600
 输出保存在当前 `$WORK` 下的 `output-NNN/`，与本次 `submit-NNN.json` 使用同一提交序号，以脚本返回的文件清单为准。URL 结果通过 HTTPS 下载；`b64_json` 结果由脚本解码保存。清单写入原提交文件的 `result.files`，包含本地路径、SHA256 及供应商来源信息。
 
 ```bash
-python3 "$SKILL/scripts/media.py" download --submission "$SUBMISSION"
+python3 "$SKILL/scripts/main.py" download --submission "$SUBMISSION"
 ```
 
 ## 最终文件交付
@@ -147,9 +166,11 @@ python3 "$SKILL/scripts/media.py" download --submission "$SUBMISSION"
 |---|---|
 | `$WORK/request.json` | 当前需求的原始输入和需求记录；每个任务文件目录各有一个 |
 | `$WORK/{供应商}-priceing.json` | 当前需求对应供应商的成本输入、计算过程和报价 |
-| `$WORK/payload.json` | 选择并确认供应商后保存的完整提交请求 |
+| `$WORK/payload.json` | 提交校验通过后由脚本保存的完整提交请求 |
 | `$WORK/submit-NNN.json` | 本次实际提交输入、`response`、`execution` 执行状态与 `result` 下载清单 |
 | `$WORK/output-NNN/*` | 本次提交的下载文件及下载中的临时文件 |
+
+供应商错误仅保留脱敏后的错误码、消息、请求 ID 及 HTTP 状态（若有），写入提交文件的 `response.error`；明确失败与结果未知分别处理，不因错误自动重发。
 
 以下状态名来自提交文件的 `execution.state`；`status` 命令只返回 `success` 和 `error`。
 

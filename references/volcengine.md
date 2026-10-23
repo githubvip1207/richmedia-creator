@@ -180,7 +180,7 @@
      "provider": "volcengine", // 必需：供应商，供脚本选择对应适配器
      "operation": "text-to-image", // 必需：能力，供脚本选择接口及结果处理方式
      "original_prompt": "生成一张正方形熊猫图片", // 流程记录：用户原始提示词，不提交给供应商
-     "payload": { // 必需：火山引擎请求参数，脚本校验后按该能力的输入约定自动添加或修改字段，构造最终 API 请求；技术转换边界见脚本操作手册“提交生成”
+     "payload": { // 必需：火山引擎请求参数，脚本校验模型、参数及需求记录后原样提交，不改写提示词；调用约定见脚本操作手册“提交生成”
        "model": "doubao-seedream-5-0-flash-260915", // 必需：准确模型 ID；使用 Pro 时替换为对应 ID
        "prompt": "一只熊猫坐在草坡上，柔和自然光，写实摄影，不添加文字。构图比例偏好：1:1。", // 必需：读取当前 request.json 的 optimized_prompt，须与确认单一致，不再改写
        "size": "1K", // 本 skill 必需：1K、1.5K、2K，或符合像素及比例限制的 WxH；用户未指定时默认最小尺寸
@@ -192,9 +192,9 @@
      }
    }
    ```
-2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 "$SKILL/scripts/media.py" submit` 提交生成任务。使用本次任务文件目录 `$WORK` 作为 `--workdir`。已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。任务文件目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
-3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/media.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
-4. **下载或保存图片：** 调用 `python3 "$SKILL/scripts/media.py" download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
+2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 "$SKILL/scripts/main.py" submit` 提交生成任务。使用本次任务文件目录 `$WORK` 作为 `--workdir`。脚本校验通过后将已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。任务文件目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
+3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/main.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
+4. **下载或保存图片：** 调用 `python3 "$SKILL/scripts/main.py" download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
 
 
 ## 图片输出规格

@@ -7,8 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from core.cost_assets import calculate_asset_inputs, probe_asset
-from core import jobs
+from core.media_probe import calculate_asset_inputs, probe_asset
+from core import submission_store as store
 
 
 class CostAssets(unittest.TestCase):
@@ -28,7 +28,7 @@ class CostAssets(unittest.TestCase):
     def test_image_dimensions_count_and_price_are_derived(self):
         spec=self.image_input()
         result=self.probe_result({'codec_type':'video','width':1200,'height':900})
-        with patch('core.cost_assets.shutil.which', return_value='/bin/ffprobe'), patch('core.cost_assets.subprocess.run', return_value=result):
+        with patch('core.media_probe.shutil.which', return_value='/bin/ffprobe'), patch('core.media_probe.subprocess.run', return_value=result):
             quote=calculate_asset_inputs(spec)
         self.assertEqual(quote['input'], spec)
         self.assertEqual({k: v for k, v in quote['calculation']['assets'][0].items() if k in ('width','height','duration')}, {'width':1200,'height':900})
@@ -40,7 +40,7 @@ class CostAssets(unittest.TestCase):
               'resolution':'480p','ratio':'16:9','duration':4,
               'assets':[{'kind':'video','source':'https://example.com/input.mp4'}]}
         result=self.probe_result({'codec_type':'video','width':1280,'height':720,'duration':'N/A'},format={'duration':'8.25'})
-        with patch('core.cost_assets.shutil.which', return_value='/bin/ffprobe'), patch('core.cost_assets.subprocess.run', return_value=result) as run:
+        with patch('core.media_probe.shutil.which', return_value='/bin/ffprobe'), patch('core.media_probe.subprocess.run', return_value=result) as run:
             quote=calculate_asset_inputs(spec)
         self.assertEqual(run.call_args.args[0][-1],spec['assets'][0]['source'])
         self.assertEqual(quote['calculation']['input_video_seconds'],[8.25])
@@ -48,7 +48,7 @@ class CostAssets(unittest.TestCase):
         self.assertEqual(quote['result']['status'],'lower_bound')
 
     def test_no_media_needs_no_ffprobe(self):
-        with patch('core.cost_assets.shutil.which', side_effect=AssertionError('No media')):
+        with patch('core.media_probe.shutil.which', side_effect=AssertionError('No media')):
             quote=calculate_asset_inputs({'provider':'byteplus','model':'seedream-5.0-flash','operation':'text-to-image','size':'1K'})
         self.assertEqual(quote['result']['currency'],'USD')
 
@@ -59,7 +59,7 @@ class CostAssets(unittest.TestCase):
 
     def test_probe_failure_hides_signed_url(self):
         asset={'kind':'video','source':'https://example.com/video?token=secret'}
-        with patch('core.cost_assets.shutil.which',return_value='/bin/ffprobe'), patch('core.cost_assets.subprocess.run',return_value=subprocess.CompletedProcess([],1,'','secret')):
+        with patch('core.media_probe.shutil.which',return_value='/bin/ffprobe'), patch('core.media_probe.subprocess.run',return_value=subprocess.CompletedProcess([],1,'','secret')):
             with self.assertRaises(ValueError) as error:
                 probe_asset(asset)
         self.assertNotIn('secret',str(error.exception))
@@ -67,10 +67,10 @@ class CostAssets(unittest.TestCase):
     def test_missing_file_dependency_and_duration_stop_estimation(self):
         with self.assertRaisesRegex(ValueError,'existing absolute'):
             probe_asset({'kind':'video','source':'/nonexistent/video.mp4'})
-        with patch('core.cost_assets.shutil.which',return_value=None):
+        with patch('core.media_probe.shutil.which',return_value=None):
             with self.assertRaisesRegex(ValueError,'ffprobe is required'):
                 calculate_asset_inputs(self.image_input())
-        with patch('core.cost_assets.shutil.which',return_value='/bin/ffprobe'), patch('core.cost_assets.subprocess.run',return_value=self.probe_result({'codec_type':'video','width':640,'height':480})):
+        with patch('core.media_probe.shutil.which',return_value='/bin/ffprobe'), patch('core.media_probe.subprocess.run',return_value=self.probe_result({'codec_type':'video','width':640,'height':480})):
             with self.assertRaisesRegex(ValueError,'no valid dimensions/duration'):
                 probe_asset({'kind':'video','source':str(self.source)})
 
@@ -78,7 +78,7 @@ class CostAssets(unittest.TestCase):
         spec=self.image_input()
         spec['assets'][0]['id']='product'
         result=self.probe_result({'codec_type':'video','width':1200,'height':900})
-        with patch('core.cost_assets.shutil.which',return_value='/bin/ffprobe'), patch('core.cost_assets.subprocess.run',return_value=result):
+        with patch('core.media_probe.shutil.which',return_value='/bin/ffprobe'), patch('core.media_probe.subprocess.run',return_value=result):
             quote=calculate_asset_inputs(spec)
         self.assertEqual(quote['input']['assets'][0]['id'],'product')
         self.assertEqual(quote['calculation']['assets'][0]['id'],'product')
@@ -86,7 +86,7 @@ class CostAssets(unittest.TestCase):
 
     def test_invalid_asset_id_is_rejected_before_probing(self):
         for identifier in ('', ' ', None, 1):
-            with self.subTest(identifier=identifier), patch('core.cost_assets.subprocess.run') as probe:
+            with self.subTest(identifier=identifier), patch('core.media_probe.subprocess.run') as probe:
                 with self.assertRaisesRegex(ValueError,'Asset id'):
                     probe_asset({'id':identifier,'kind':'image','source':str(self.source)})
                 probe.assert_not_called()

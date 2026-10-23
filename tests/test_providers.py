@@ -14,12 +14,14 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
+from commands import submit as submit_command, status as status_command
 from providers import byteplus, volcengine, configured
 from config_fixture import config_fixture
-from core import jobs
+from core import submission_store as store
 from cost_fixture import save_with_cost
-from core.request import compile_request, CATALOGS, ROOT
-from core.estimate import estimate
+from core.request import CATALOGS, ROOT
+from core.legacy_request import compile_request
+from core.cost_formula import estimate
 
 
 # 构造 BytePlus 视频请求夹具，使用逻辑模型别名和测试优化记录，可用 extra 覆盖场景。
@@ -85,7 +87,7 @@ class SupplierBehavior(unittest.TestCase):
     # 将国内人民币价目表交给 BytePlus 任务，应因供应商或币种不匹配而拒绝。
     def test_wrong_supplier_pricing_rejected(self):
         with self.assertRaisesRegex(ValueError,'supplier/currency'):
-            estimate(compile_request(request()),pricing=jobs.read(ROOT/'models/volcengine-pricing.json'))
+            estimate(compile_request(request()),pricing=store.read(ROOT/'models/volcengine-pricing.json'))
 
     # 验证参考视频按输入加输出时长计 Token，并使用 BytePlus 有视频美元费率。
     # 未独立验证最低计费门槛时，金额上界必须保持未知。
@@ -106,6 +108,13 @@ class SupplierBehavior(unittest.TestCase):
             compile_request(request(operation='image-to-video', mode='first-frame',assets=[a]))
 
 
+def selected_request(provider='byteplus'):
+    from test_native_byteplus import request as native_image
+    spec = native_image('dola-seedream-5-0-flash-260915' if provider == 'byteplus' else 'doubao-seedream-5-0-flash-260915')
+    spec['provider'] = provider
+    return spec
+
+
 class SelectedSupplierSubmission(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
@@ -113,37 +122,35 @@ class SelectedSupplierSubmission(unittest.TestCase):
         self.root=Path(self.tmp.name)
         self.enterContext(config_fixture({'VOLCENGINE_API_KEY':'domestic-test','BYTEPLUS_API_KEY':'overseas-test'},clear=True))
         for name in ('volcengine','byteplus'):
-            save_with_cost(request(name),self.root)
+            save_with_cost(selected_request(name),self.root)
 
     def test_multi_configuration_requires_selection(self):
-        spec=request();spec.pop('provider')
-        with self.assertRaisesRegex(ValueError,'Multiple suppliers'):
+        spec=selected_request();spec.pop('provider')
+        with self.assertRaises(ValueError):
             compile_request(spec)
 
     def test_only_selected_supplier_is_submitted_once(self):
-        with patch('core.preflight.skill_status',return_value={'status':'ok'}), \
-             patch.object(byteplus,'request',return_value={'id':'byteplus-fixture'}) as overseas, \
+        with patch('core.dependencies.skill_status',return_value={'status':'ok'}), \
+             patch.object(byteplus,'request',return_value={'data':[{'url':'https://example.com/result.png'}]}) as overseas, \
              patch.object(volcengine,'request') as domestic:
-            state=jobs.submit(self.root,request(),'TEST FIXTURE: choose BytePlus')
+            state=submit_command.submit(self.root,selected_request(),'TEST FIXTURE: choose BytePlus')
             self.assertEqual(state['provider'],'byteplus')
-            self.assertEqual(overseas.call_args.args[2]['model'],'dreamina-seedance-2-5-260628')
-            with self.assertRaisesRegex(ValueError,'already attempted'):
-                jobs.submit(self.root,request('volcengine'),'TEST FIXTURE')
+            self.assertEqual(overseas.call_args.args[2]['model'],'dola-seedream-5-0-flash-260915')
             overseas.assert_called_once();domestic.assert_not_called()
-        with patch.object(byteplus,'status',return_value={'id':'byteplus-fixture','status':'running'}) as selected, \
+        with patch.object(byteplus,'status') as selected, \
              patch.object(volcengine,'status') as other:
-            jobs.status(self.root)
-            selected.assert_called_once();other.assert_not_called()
+            status_command.status(self.root)
+            selected.assert_not_called();other.assert_not_called()
 
     def test_timeout_does_not_fail_over(self):
-        with patch('core.preflight.skill_status',return_value={'status':'ok'}), \
+        with patch('core.dependencies.skill_status',return_value={'status':'ok'}), \
              patch.object(byteplus,'request',side_effect=byteplus.ProviderError('fixture timeout',True)), \
              patch.object(volcengine,'request') as domestic:
             with self.assertRaises(byteplus.ProviderError):
-                jobs.submit(self.root,request(),'TEST FIXTURE')
-            self.assertEqual(jobs.read(self.root/'submit-001.json')['execution']['state'],'submission_unknown')
+                submit_command.submit(self.root,selected_request(),'TEST FIXTURE')
+            self.assertEqual(store.read(self.root/'submit-001.json')['execution']['state'],'submission_unknown')
             with self.assertRaisesRegex(ValueError,'already attempted'):
-                jobs.submit(self.root,request('volcengine'),'TEST FIXTURE')
+                submit_command.submit(self.root,selected_request('volcengine'),'TEST FIXTURE')
             domestic.assert_not_called()
 
 

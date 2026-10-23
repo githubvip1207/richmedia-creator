@@ -9,7 +9,8 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from core import jobs
+from commands import status as status_command, download as download_command
+from core import submission_store as store
 from cost_fixture import save_with_cost
 
 
@@ -38,8 +39,8 @@ class DownloadRetry(unittest.TestCase):
                 return super().read(3)
         with tempfile.TemporaryDirectory() as d:
             target = Path(d) / 'image.part'
-            with patch.object(jobs.urllib.request, 'urlopen', side_effect=[Broken(b'partial'), Response(b'complete')]) as get, patch.object(jobs.time, 'sleep') as sleep:
-                jobs.download_url('https://example.com/result.png', target)
+            with patch.object(download_command.urllib.request, 'urlopen', side_effect=[Broken(b'partial'), Response(b'complete')]) as get, patch.object(status_command.time, 'sleep') as sleep:
+                download_command.download_url('https://example.com/result.png', target)
                 self.assertEqual(target.read_bytes(), b'complete')
                 self.assertEqual(get.call_count, 2)
                 self.assertEqual(get.call_args.kwargs['timeout'], 120)
@@ -48,9 +49,9 @@ class DownloadRetry(unittest.TestCase):
     # 连续抛出传输错误，验证最多三次 GET、2/4 秒退避，并确保异常摘要不泄露签名 URL。
     def test_exhaustion_stops_after_three_attempts_and_hides_url(self):
         with tempfile.TemporaryDirectory() as d:
-            with patch.object(jobs.urllib.request, 'urlopen', side_effect=urllib.error.URLError('https://secret.invalid/signed')) as get, patch.object(jobs.time, 'sleep') as sleep:
+            with patch.object(download_command.urllib.request, 'urlopen', side_effect=urllib.error.URLError('https://secret.invalid/signed')) as get, patch.object(status_command.time, 'sleep') as sleep:
                 with self.assertRaisesRegex(RuntimeError, 'after 3 attempt') as caught:
-                    jobs.download_url('https://example.com/result.png', Path(d) / 'image.part')
+                    download_command.download_url('https://example.com/result.png', Path(d) / 'image.part')
                 self.assertNotIn('secret', str(caught.exception))
                 self.assertEqual(get.call_count, 3)
                 self.assertEqual([c.args[0] for c in sleep.call_args_list], [2, 4])
@@ -58,9 +59,9 @@ class DownloadRetry(unittest.TestCase):
     # 404 表示资源不可用；验证只请求一次且不等待，避免对不可重试错误反复下载。
     def test_http_404_stops_without_retry(self):
         error = urllib.error.HTTPError('https://example.com/result.png', 404, 'missing', {}, None)
-        with patch.object(jobs.urllib.request, 'urlopen', side_effect=error) as get, patch.object(jobs.time, 'sleep') as sleep:
+        with patch.object(download_command.urllib.request, 'urlopen', side_effect=error) as get, patch.object(status_command.time, 'sleep') as sleep:
             with self.assertRaisesRegex(RuntimeError, 'HTTP 404'):
-                jobs.download_url('https://example.com/result.png', '/unused')
+                download_command.download_url('https://example.com/result.png', '/unused')
             self.assertEqual(get.call_count, 1)
             sleep.assert_not_called()
 
@@ -68,23 +69,23 @@ class DownloadRetry(unittest.TestCase):
     def test_http_503_retries(self):
         error = urllib.error.HTTPError('https://example.com/result.png', 503, 'busy', {}, None)
         with tempfile.TemporaryDirectory() as d:
-            with patch.object(jobs.urllib.request, 'urlopen', side_effect=[error, Response(b'ok')]), patch.object(jobs.time, 'sleep'):
+            with patch.object(download_command.urllib.request, 'urlopen', side_effect=[error, Response(b'ok')]), patch.object(status_command.time, 'sleep'):
                 target = Path(d) / 'image.part'
-                jobs.download_url('https://example.com/result.png', target)
+                download_command.download_url('https://example.com/result.png', target)
                 self.assertEqual(target.read_bytes(), b'ok')
 
     # 响应体短于声明 Content-Length 时视为不完整下载，验证重新取回完整内容。
     def test_short_body_is_retried(self):
         with tempfile.TemporaryDirectory() as d:
-            with patch.object(jobs.urllib.request, 'urlopen', side_effect=[Response(b'short', 100), Response(b'whole')]) as get, patch.object(jobs.time, 'sleep'):
+            with patch.object(download_command.urllib.request, 'urlopen', side_effect=[Response(b'short', 100), Response(b'whole')]) as get, patch.object(status_command.time, 'sleep'):
                 target = Path(d) / 'image.part'
-                jobs.download_url('https://example.com/result.png', target)
+                download_command.download_url('https://example.com/result.png', target)
                 self.assertEqual(get.call_count, 2)
                 self.assertEqual(target.read_bytes(), b'whole')
 
     # 在完整下载流程中模拟超时恢复，验证文件内容与完成标记；再次下载应复用哈希匹配的文件。
     def test_download_pipeline_records_complete_media_after_retry(self):
-        from test_media import png
+        from test_runtime import png
         data = png()
         with tempfile.TemporaryDirectory() as d:
             job = Path(d) / 'job'
@@ -92,12 +93,12 @@ class DownloadRetry(unittest.TestCase):
                           'operation':'text-to-image', 'prompt':'小猫',
                           'parameters':{'ratio':'9:16'}}, job)
             from core.request import compile_request
-            jobs.write(job / 'submit-001.json', {**spec,
+            store.write(job / 'submit-001.json', {**spec,
                        'execution': {'state':'succeeded','compiled':compile_request(spec)},
                        'response': {'data':[{'url':'https://example.com/result.png'}]}})
-            with patch.object(jobs.urllib.request, 'urlopen', side_effect=[TimeoutError(), Response(data)]) as get, patch.object(jobs.time, 'sleep'):
-                result = jobs.download(job)
+            with patch.object(download_command.urllib.request, 'urlopen', side_effect=[TimeoutError(), Response(data)]) as get, patch.object(status_command.time, 'sleep'):
+                result = download_command.download(job)
                 self.assertEqual(Path(result['files'][0]['path']).read_bytes(), data)
-                self.assertTrue(jobs.read(job / 'submit-001.json')['execution']['download_complete'])
-                jobs.download(job)
+                self.assertTrue(store.read(job / 'submit-001.json')['execution']['download_complete'])
+                download_command.download(job)
                 self.assertEqual(get.call_count, 2)
