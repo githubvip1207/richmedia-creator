@@ -92,7 +92,7 @@ init先解析标准输入：空输入、非法JSON、非对象顶层或NaN/Infin
 
 汇率固定请求 [Frankfurter 的 ECB USD/CNY 接口](https://api.frankfurter.dev/v2/providers/ecb/rate/usd/cny)，无需 API Key。检查响应币种、有限正数汇率和数据日期；过期时间为数据日期 UTC 零点起七天，不按下载时间重新延长旧数据。`.env` 中只更新 `USD_CNY` 和 `USD_CNY_EXPIRES_AT`，保留其他配置、注释及换行风格。失败时保留原值，不切换来源或编造汇率。
 
-`USD_CNY_EXPIRES_AT` 使用带时区的 ISO 8601，例如 `2026-10-28T00:00:00+00:00`。缺失、无效或过期时，普通计划与比价只展示原币；需要换算预算时先修复汇率。旧 `ARK_API_KEY`、`USD_CNY_VERIFIED_ON`、`USD_CNY_SOURCE` 不再作为配置读取。更新 `.env` 后若要使用新汇率，重新估价并确认。
+`USD_CNY_EXPIRES_AT` 使用带时区的 ISO 8601，例如 `2026-10-28T00:00:00+00:00`。缺失、无效或过期时，普通计划与比价只展示原币；需要换算预算时先修复汇率。旧 `USD_CNY_VERIFIED_ON`、`USD_CNY_SOURCE` 不再作为配置读取。更新 `.env` 后若要使用新汇率，重新估价并确认。
 
 task-spec.json 执行配置结构如下（严格JSON，不含凭证或Base64）：
 

@@ -64,7 +64,7 @@ The requirement record is not an API payload or direct submit input. Derive a se
 
 Exchange rates use the fixed [Frankfurter ECB USD/CNY endpoint](https://api.frankfurter.dev/v2/providers/ecb/rate/usd/cny), without an API key. Validate the currency pair, finite positive rate, and observation date. Expiration is seven days after the observation date at UTC midnight, not seven days after download of potentially old data. Update only `USD_CNY` and `USD_CNY_EXPIRES_AT` in `.env`, preserving other configuration, comments, and line endings. On failure, preserve existing values without switching sources or inventing rates.
 
-`USD_CNY_EXPIRES_AT` is timezone-aware ISO 8601, for example `2026-10-28T00:00:00+00:00`. Missing, invalid, or expired rates result in native-currency quotes in ordinary planning/comparison; repair the rate before applying a budget requiring conversion. Legacy `ARK_API_KEY`, `USD_CNY_VERIFIED_ON`, and `USD_CNY_SOURCE` are no longer read as configuration. Re-estimate and reconfirm to use an updated .env rate.
+`USD_CNY_EXPIRES_AT` is timezone-aware ISO 8601, for example `2026-10-28T00:00:00+00:00`. Missing, invalid, or expired rates result in native-currency quotes in ordinary planning/comparison; repair the rate before applying a budget requiring conversion. Legacy `USD_CNY_VERIFIED_ON` and `USD_CNY_SOURCE` are no longer read as configuration. Re-estimate and reconfirm to use an updated .env rate.
 
 Executable task-spec.json schema (strict JSON; no credentials or Base64):
 

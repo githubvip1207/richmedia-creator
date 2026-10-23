@@ -1,5 +1,5 @@
 # BytePlus 薄适配层：固定海外端点与 BYTEPLUS_API_KEY，保持供应商账户隔离。
-# 与国内适配器共享传输实现，但不回退使用 ARK_API_KEY。
+# 与国内适配器共享传输实现，仅使用 BYTEPLUS_API_KEY。
 """BytePlus adapter; a separate supplier/account from Volcengine."""
 from urllib.parse import quote
 from .transport import ProviderError, payload
