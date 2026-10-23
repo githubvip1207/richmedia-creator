@@ -101,12 +101,6 @@ def calculate_inputs(inputs, pricing=None, context=None, fx=None, measured_asset
     return build_record(inputs, compiled, billing_inputs(compiled), pricing, detail, context, fx, jobs.now())
 
 
-def calculate(spec, pricing=None):
-    """Internal helper for existing request-based callers, not a CLI operation."""
-    compiled = compile_request(spec)
-    return calculate_inputs(billing_inputs(compiled), pricing, spec.get('estimate_context'), spec.get('fx'), compiled['assets'])
-
-
 def consume_quote(spec, quote):
     """Reuse saved formula inputs and result, without loading or calculating new prices."""
     require(isinstance(quote, dict) and set(quote) == {'input', 'calculation', 'result'},
@@ -122,7 +116,7 @@ def consume_quote(spec, quote):
         s['fx'] = copy.deepcopy(calculation['fx'])
     if s.get('fx') is not None:
         validate_fx(s['fx'])
-    compiled = compile_request(s)
+    compiled = compile_request(s, measured_assets=calculation['assets'] if 'payload' in s else None)
     billing = billing_inputs(compiled)
     require(all(calculation.get(k) == v for k, v in billing.items())
             and s.get('estimate_context') == calculation.get('estimate_context')

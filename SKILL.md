@@ -1,185 +1,124 @@
 ---
 name: richmedia-creator
-description: Generate and edit images and videos. Image capabilities include text-to-image generation, reference-based creation, multi-image fusion, region editing, and layer decomposition; video capabilities include text-to-video generation, image-to-video generation, first/last-frame control, multimodal image/video/audio references, content editing, and duration extension. Use for visual creation and media asset production.
+description: 生成和编辑图片与视频。图片支持文字生成、参考图创作、多图融合、局部编辑和图层拆分；视频支持文字生成、图片转视频、首尾帧控制、图片/视频/音频多模态参考、内容编辑和时长延长。适用于视觉创作和素材制作。
 ---
 
 # 富媒体生成器 · RichMedia Creator
 
-This skill integrates image and video processing capabilities from multiple suppliers. It generates or edits images and videos based on user requirements, with a unified workflow for prompt optimization, parameter configuration, supplier selection, cost estimation, and delivery of generated results. Each supplier’s credentials, models, prices, assets, and jobs are managed independently.
+- 该技能集成多个供应商的图片、视频处理能力。根据用户需求生成或编辑图片与视频，统一处理提示词优化、参数配置、供应商选择、费用预估和生成结果交付。各供应商的凭证、模型、价格、素材与任务独立管理。
+- 脚本命令及请求结构见[脚本操作手册](references/usage.md)
 
-## Pre-run checks
+## 运行前检查
 
-Run `python3 <skill-dir>/scripts/media.py check` for read-only checks. Use `doctor` to repair detected issues, `doctor --dependencies` for dependencies only, or `doctor --exchange-rate` to refresh the rate in `.env`.
+运行 `python3 scripts/media.py check` 对运行环境进行检查。发现异常时，按下表 “异常处理” 方案处理。运行脚本时保持当前项目为工作目录，以便读取 `.env`。。
 
-### Configuration checks
+### 配置检查
 
-Read configuration from the `.env` file in the current project directory.
+从当前项目目录的 `.env` 文件读取配置，不要在聊天、日志或任务文件中暴露密钥。
 
-| Setting | Purpose |
-|---|---|
-| `VOLCENGINE_API_KEY` | API key required when using Volcengine |
-| `BYTEPLUS_API_KEY` | API key required when using BytePlus |
-| `USD_CNY` | USD-to-CNY exchange rate, expressed as CNY per USD |
-| `USD_CNY_EXPIRES_AT` | Exchange rate expiration time |
+| 配置项 | 用途 | 异常处理 |
+|---|------|---|
+| `BYTEPLUS_API_KEY` | 使用 BytePlus 时所需的 API 密钥 | 缺失时忽略该供应商 |
+| `VOLCENGINE_API_KEY` | 使用 Volcengine 时所需的 API 密钥 | 缺失时忽略该供应商 |
+| `USD_CNY` | 美元兑人民币汇率，表示 1 美元对应的人民币金额 | 缺失时使用 `python3 scripts/media.py doctor --exchange-rate` 更新，或仅展示原币报价 |
+| `USD_CNY_EXPIRES_AT` | 汇率过期时间，格式为 ISO 8601 | 缺失或过期时，使用 `python3 scripts/media.py doctor --exchange-rate` 更新，或仅展示原币报价 |        
 
-Check that the selected supplier's API key is configured. When currency conversion is needed, check that the exchange rate configuration is complete and has not expired. The script manages the exchange rate source internally; users do not need to configure it.
+### 依赖检查
 
-If required configuration is missing, ask the user to supply it locally. If the exchange rate is missing or expired, update it first or show only native-currency quotes. Never expose API keys in chat, logs, or task files.
+| 依赖项 | 用途 | 异常处理 |
+|---|------|---|
+| `sd25-pe` | 提示词优化技能 | 使用命令 `python3 scripts/media.py doctor --dependencies` 安装，安装失败停止相关任务 |
+| `ffprobe` | 读取图片、视频和音频的尺寸、时长、编码等媒体信息 | 使用命令 `python3 scripts/media.py doctor --dependencies` 安装，安装失败则停止相关任务 |
 
-### Dependency checks
+## 工作流程
 
-Check that the scripts, helper tools, and prompt-optimization skills required for the current task are available. Install missing dependencies according to the relevant references, then check again. If they remain unavailable, explain why and stop the affected operation.
+### 1. 明确用户意图
 
-### Input checks
+根据用户描述和提供的素材，确定用户所需能力及模式。
 
-Check that input assets exist and are readable, and that their formats, dimensions, durations, and task parameters meet the applicable requirements. Identify any information or adjustments needed when they do not.
-
-## Setup
-
-1. Resolve this skill's directory and run `python3 <skill-dir>/scripts/media.py check` from the current project directory. Business configuration is read from project `.env`: `VOLCENGINE_API_KEY`, `BYTEPLUS_API_KEY`, `USD_CNY`, and `USD_CNY_EXPIRES_AT`. Configure missing supplier keys locally; never request them in chat or write them to logs, requests, or skill files. The command checks configuration and dependency presence, not live credentials, model permissions, balances, or quotas.
-2. Use `doctor` to repair detected issues, `doctor --dependencies` to install missing sd25-pe/ffprobe dependencies, or `doctor --exchange-rate` to refresh the exchange rate in project `.env`. Recheck after repairs. Seedance 2.5 requires a readable, nonempty `sd25-pe/SKILL.md`; if installation fails, stop tasks requiring it. Other tasks do not require sd25-pe. ffprobe is required only when the task depends on its media inspection.
-3. For every Seedance 2.5 prompt, read and apply the installed `sd25-pe/SKILL.md`, including its applicable instructions. Record `optimizer: {"skill":"sd25-pe","status":"applied"}` only after applying it. Other models use their relevant model references; do not apply 2.5 templates to other models.
-
-## File storage
-
-Keep only final deliverables in the user-selected output directory (default: the current project directory). Before preparing a task, supply the agent-authored requirement JSON on stdin to `python3 <skill-dir>/scripts/media.py init` to create a private working directory named `/tmp/richmedia-YYYYMMDDHHmmss/`; reuse the returned directory throughout the task. Store all requests, costs, job state, API responses, usage, download manifests, temporary files and intermediate downloads beneath it. Do not create task/work directories such as `generated/`, `output/`, `richmedia/` or `richmedia-jobs/` in the project. Keep the CLI working directory at the project so its `.env` still loads.
-
-After a successful download, copy only the completed media to the output directory with a descriptive, non-conflicting filename; preserve original bytes. For layer decomposition, layer images and placement metadata are final deliverables. Keep all other metadata and recovery state in the `/tmp` working directory, including after failure or unknown submission outcome. Return links/previews to the final copies and state the temporary working path when needed for resuming. Temporary storage can be cleared by the system; check existing state before resuming and never treat missing state as permission to repeat a paid POST.
-
-## Workflow
-
-### 1. Identify intent and deliverables
-
-Use the user's description and supplied assets to identify the capability and mode for this task.
-
-| Intent / capability | operation | Identifying requirement | Modes |
+| 能力 | 英文标识 | 判断依据 | 模式 |
 |---|---|---|---|
-| Text-to-image | `text-to-image` | Generate an image from a text description. | — |
-| Image-to-image | `image-to-image` | Generate or modify images based on existing images. | Single-image editing, multi-image fusion, region editing |
-| Layer decomposition | `decompose-layers` | Separate an image into a background and usable layers. | — |
-| Text-to-video | `text-to-video` | Generate a video from text without reference assets. | — |
-| Image-to-video | `image-to-video` | Use specified images as the opening frame or opening and ending frames. | First frame, first and last frames |
-| Reference-to-video | `reference-to-video` | Borrow reference assets to generate a new video, or modify an existing video's content. | Reference generation, video editing |
-| Video extension | `extend-video` | Continue before or after an existing video. | Extend before, extend after |
+| 文生图 | `text-to-image` | 根据文字描述生成图片。 | — |
+| 图生图 | `image-to-image` | 基于已有图片生成或修改图片。 | 单图编辑、多图融合、局部编辑 |
+| 图层拆分 | `decompose-layers` | 将已有图片拆分为背景和可分别使用的图层。 | — |
+| 文生视频 | `text-to-video` | 根据文字描述生成视频，不使用参考素材。 | — |
+| 图生视频 | `image-to-video` | 使用指定图片作为视频的起始画面，或指定起始和结束画面。 | 首帧、首尾帧 |
+| 参考生视频 | `reference-to-video` | 借鉴素材生成新视频，或修改已有视频的内容。 | 参考生成、视频编辑 |
+| 视频延长 | `extend-video` | 在已有视频之前或之后继续生成内容。 | 向前延长、向后延长 |
 
-An image used as a first/last frame belongs to image-to-video; an image used as a person, product or style reference belongs to reference-to-video.
+注意：
+- 同一份图片作为首帧／首尾帧时归为“图生视频”；作为人物、产品、风格等参考时归为“参考生视频”。
+- 用户要求分阶段完成时，分别识别每个阶段的能力和模式。
 
-For staged requests, identify each stage's capability and mode separately.
+### 2. 根据供应商能力检查运行要求
 
-Use only these seven `operation` values; image-to-image has no top-level `mode` and expresses editing/fusion intent in the prompt. See supplier references for video mode parameters.
+按当前用户所需能力读取候选供应商文档中的模型列表、能力列表，以及在对应能力实现中查看运行要求，确认可用模型、支持范围和所需字段。供应商文档路径如下：
 
-### 2. Read supplier capabilities and check prerequisites
+| 供应商 | 文档路径 |
+|---|---|
+| Volcengine | [volcengine模型列表](references/volcengine.md#模型列表) [volcengine能力列表](references/volcengine.md#能力列表) [volcengine运行实现](references/volcengine.md#运行步骤) |
+| BytePlus | [byteplus模型列表](references/byteplus.md#模型列表) [byteplus能力列表](references/byteplus.md#能力列表) [byteplus运行实现](references/byteplus.md#运行步骤) |
 
-Read the relevant [Volcengine](references/volcengine.md) or [BytePlus](references/byteplus.md) documentation and model catalog. Distinguish provider API support from capabilities actually implemented by this skill. Check required inputs, counts, formats, dimensions, durations, transport modes and parameter limits. Perform task-relevant configuration and dependency checks; configured credentials do not prove access, balance or successful live calls. Explain unsupported operations without silently changing the model or supplier.
+注意：
+- 基于用户已提供的信息提炼本次任务的模型、提示词、素材和调用参数，逐项对照对应能力的运行要求并完善。所需信息未提供、不明确或存在歧义时，先询问用户并取得准确信息，再确定执行方案。
+- 不得自行猜测或用默认值代替尚未确认的需求。不支持的操作应说明原因，不得擅自更换用户指定的模型或供应商。
 
-### 3. Prepare the run environment
+### 3. 准备运行环境
 
-From the project directory pass agent-authored JSON through stdin to `python3 <skill-dir>/scripts/media.py init`; directory names use the system local clock. Reuse its returned `workdir` throughout this task, including supplier examples. The command validates the stdin JSON object, creates a private directory, writes request.json, and returns only `{"workdir":"/tmp/richmedia-YYYYMMDDHHmmss"}`; it does not infer task content.
-
-The agent supplies the original prompt, resolved user intent, confirmed information from step 2, each candidate supplier's model/operation/parameters, and asset paths and purposes through stdin for init to save as `request.json`. Keep supplier-specific parameters, roles, asset IDs and provenance under the corresponding supplier. Ask for unresolved required information rather than guessing, and never store credentials or Base64 bodies. See [run directory and requirement records](references/usage.md#run-directory-and-requirement-records).
-
-This agent-maintained record is not an API payload or a submit input. After prompt optimization and estimation inputs are ready, derive a separate CLI-compatible `task-spec.json` or `<provider>-task-spec.json` without overwriting the original prompt. The agent follows the request.json field format in the CLI manual; init validates JSON syntax and the top-level object and writes the file, without validating business fields.
-
-### 4. Estimate costs
-
-1. Resolve candidate suppliers: calculate only the user-selected supplier, or each available supplier supporting the task when none was selected.
-2. Read the candidate supplier's cost rules ([Volcengine](references/volcengine.md#cost-calculation)) and assemble a JSON object following the operation's required fields, types and examples.
-3. Run the shared cost script from the project directory, passing that JSON on stdin, once per supplier. Replace the JSON placeholder in this command template before execution:
-
-   ```bash
-   python3 "$SKILL/scripts/media.py" estimate-cost --workdir "$WORK" <<'JSON'
-   <JSON object assembled from the current supplier's rules>
-   JSON
-   ```
-
-   `$SKILL` is the installed skill directory and `$WORK` is the task workdir from step 3. Python inspects the supplied media, reads rates and calculates costs, saving the result to `$WORK/<supplier>/cost.json`.
-
-4. Read `result` for the confirmation: amount, currency, range and uncertainty reasons. Unknown is not zero, and a lower bound is not a total. Only use script-returned conversions to compare currencies. Re-estimate and obtain confirmation after generation settings change; submission reuses the saved estimate and evidence. An estimate is not an actual bill or a hard spending cap.
-
-Example showing only `result` from the complete response saved to `$WORK/<supplier>/cost.json` (see the [CLI manual](references/usage.md) for the calculation record):
+根据前两步的信息组织如下 JSON 内容，并通过 `python3 scripts/media.py init` 命令完成任务初始化，该命令返回 workdir 将作为本次任务后续所有过程文件的根目录，已有运行目录时复用。
 
 ```jsonc
 {
-  "status": "estimate", // estimate: value/range; lower_bound: upper amount unknown; unknown: amount undetermined
-  "currency": "CNY", // Native currency for the confirmation
-  "amount": { // Example: Seedream Pro, 1K, one input image and one output
-    "min": 0.3, // Lower amount; null when unknown
-    "max": 0.3 // Upper amount; null when unknown
+  "original_prompt": "把熊猫图片的背景改成草地，保留熊猫外观，生成正方形图片", // 必需：用户原始提示词，原样保留
+  "intent": {
+    "operation": "image-to-image" // 必需：7 个能力标识之一；具体修改要求保留在原始提示词中，不再记录 mode 或 description
   },
-  "uncertainties": [] // Items contain field and reason explaining uncertain costs
-  // Valid FX adds conversion: currency, amount {min,max}, usd_cny and expires_at.
-  // Without valid FX, conversion is absent.
+  "assets": [ // 必需：完整素材目录；无素材时为 []
+    {
+      "id": "panda", // 必需：任务内唯一标识，供供应商引用；不是供应商素材 ID
+      "kind": "image", // 必需：image、video 或 audio
+      "source": "https://example.com/panda.jpg", // 必需：执行前替换为实际 HTTPS URL 或本地绝对路径
+      "purpose": "待编辑的熊猫图片，保留熊猫外观，只修改背景" // 必需：素材用途，只在这里记录一次
+    }
+  ],
+  "providers": { // 必需：以实际候选供应商标识为键
+    "volcengine": {
+      "model": "doubao-seedream-5-0-flash-260915", // 必需：该供应商的模型别名或准确 ID
+      "operation": "image-to-image", // 必需：该供应商支持的能力，与 intent.operation 对应
+      "parameters": { // 必需：按供应商能力要求整理已确定的参数
+        "size": "1K", // 本例输出尺寸档位
+        "ratio": "1:1" // 本例构图比例
+      },
+      "assets": [ // 必需：只列本供应商使用的素材引用，保留输入顺序；无素材时为 []
+        {"id": "panda"} // 必需：引用顶层 assets 中的同名 id，不重复 kind、source、purpose
+      ]
+    }
+  }
 }
 ```
 
-### 5. Generate the confirmation and obtain confirmation
+### 4. 预估成本
 
-Follow [task confirmation template and native selection](references/task-confirmation.md) to generate the sheet and obtain user confirmation.
+对支持当前所需能力的供应商依次读取供应商文档中的“预估成本”规则，根据前三步的信息组织 JSON 内容，并通过 `python3 scripts/media.py estimate-cost` 命令对每一个支持该能力的供应商完成成本预估，该命令返回的 JSON 对象将包含该供应商的成本预估结果。
 
-### 6. Execute the confirmed supplier plan
+| 供应商 | 预估成本规则 |
+|---|---|
+| Volcengine | [volcengine预估成本](references/volcengine.md#预估成本) |
+| BytePlus | [byteplus预估成本](references/byteplus.md#预估成本) |
 
-- Resolve the execution plan using the supplier, model and capability confirmed by the user in step 5.
-- Read “Generation steps” for that capability in the selected supplier's reference (see the supplier references in step 2), and assemble the required call parameters.
-- Call the specified scripts in the documented order. Parse each step's returned result before proceeding to the next, until generated outputs have been downloaded or saved.
-- Follow that capability's “Success, failure and retries” instructions to determine the outcome and handle failures or recovery.
+### 5. 生成任务确认单并取得确认
 
-### 7. Verify and deliver
+按[任务确认单模板与选择确认](references/confirmation.md)生成确认单并取得用户确认。只有用户确认后才执行后续任务，如果用户未选择任何供应商，则基于用户的输入继续调整确认单，直到用户确认。
 
-Use the confirmed user requirements and the operation-specific success criteria to check provider status, expected output count, file integrity and observable product details, identity, text, sequence, audio and duration. Queued/running status or API acceptance is not completion. State inspection limits. Copy only final media to the delivery directory, include placement metadata for decomposed layers, and provide absolute local links or previews. Keep intermediate state in the temporary directory. Distinguish estimates, API usage and verified billing; further paid corrections require a new confirmation.
+### 6. 执行已确认的供应商方案
 
-### Creative and model notes
+使用用户在第 5 步确认的供应商、模型和能力。读取当前候选供应商文档中对应能力的“运行步骤”规则，并按指引完成任务。根据该能力的“成功、失败与重试”说明判断执行结果，并处理失败或恢复任务。
 
-#### Images
+| 供应商 | 运行步骤 |
+|---|---|
+| Volcengine | [volcengine运行步骤](references/volcengine.md#运行步骤) |
+| BytePlus | [byteplus运行步骤](references/byteplus.md#运行步骤) |
 
-Use a concise brief: subject/product, intended use, action, setting, composition, light, style, text content, and properties that must remain. Inspect reference images and assign each a role (product shape, background, palette, person). Do not add unrequested decorative objects or change product markings. Default to `size=1K` and one output. Infer an image composition ratio from the prompt and set `parameters.ratio`; it is appended as prompt guidance, not a guaranteed output pixel ratio. User-specified exact pixels become `size=WxH` and take precedence over a size tier.
+### 7. 核验结果并交付
 
-For edits, state the change and scope. Region editing uses verified normalized coordinates or user-provided annotations. Preserve transparent input alpha only through the supported image-edit path. Decomposing a picture returns a background and transparent layers; save every result and bounding_box/z_index metadata rather than just data[0]. Pro/Flash image batches use multiple independent tasks, not native group generation.
-
-#### Seedance 2.5
-
-Mandatory: apply installed sd25-pe. Use its task-specific templates and material-responsibility rules. Distinguish semantic reference from strict first/last-frame input and from actual edit/extension. Use upload-order per-type references and preserve identities, dialogue and event order. Runtime parameters remain separate from prompt narrative. Preserve user-specified timestamp events; do not invent timestamps just because an API duration was selected.
-
-Video editing: explicitly express editing intent (e.g. 编辑视频、修改、替换、删除、增加). 2.5 `omni_reference_task_type=edit`, ratio=adaptive, duration=-1. Extension: explicitly express 向前/向后延长、延续、续写 and use type=extend with adaptive ratio. Reference creation: type=reference; clearly describe what to borrow, avoiding wording that accidentally requests strict editing. Source video selected by model when multiple videos exist; if ambiguous, clarify the target before confirmation.
-
-#### Seedance 2.0 / Fast / Mini
-
-Use the 2.0 official guide rather than treating 2.5 prompt control as universal. Describe subject, actions, scene, light, shots, style and necessary constraints. Use shot sequence for ordering rather than promising precise 2.5 timestamp behavior. State the specific reference dimension (appearance/action/camera/voice). Editing/extension should name 视频N directly rather than vaguely saying 参考视频N. Do not overconstrain or add unrequested subtitles, logos, watermarks or generic negative-prompt bundles. Platform watermark is a separate displayed API setting.
-
-#### Image → video
-
-Prepare/confirm/generate/download the image first. Inspect that actual result before forming the next video plan; do not pre-approve a video using an unknown future image. Each paid step has its own confirmation. A user's approval of image generation does not approve subsequent video generation. For trusted portraits, keep original bytes, account provenance and timestamps; do not assume any Seedream edit output or cross-platform image is trusted.
-
-#### Longer videos and creative methods
-
-Use native model duration limits. Split longer stories into separately reviewed shots when needed; do not imply that a model can generate an unlimited-length single clip. Tail-frame chaining and video extension can maintain continuity, but every paid generation needs a fresh plan/confirmation. Stitching is a separate explicitly requested post-processing task, not currently a bundled command. Advertising/UGC methodology can be added as focused references after concrete examples are supplied; do not invent a large unvalidated prompt library.
-
-#### Quality review
-
-Inspect generated media when the environment can display/read it. Check requested product details, identities, scene order, text, audio and duration. State observation limits when audio/video cannot be inspected. Do not claim quality verification from task success or a file header. If correction needs another paid request, explain the targeted change and obtain approval for a new plan.
-
-### Existing reference content
-
-1. Read only the relevant references: [workflow](#workflow), [Volcengine constraints](references/volcengine.md), [BytePlus differences](references/byteplus.md), [CLI and request schema](references/usage.md), [Volcengine cost rules](references/volcengine.md#cost-calculation), and [task confirmation](#5-generate-the-confirmation-and-obtain-confirmation).
-2. Inspect provided media. Preserve requested identities, product details, subject count, event order, dialogue, model and material mapping. Record the original prompt separately. Do not invent asset observations. Give each used asset a purpose; number video content by type and upload order.
-3. For image creation, default to the smallest supported size and one output. Infer a composition ratio and set `parameters.ratio`; current image adapters express it as prompt guidance, not guaranteed output pixels. Exact user-specified pixels take precedence. For video creation/editing, use the lowest supported resolution (480p), minimum configurable duration (4 seconds), one request and no optional audio unless requested or needed. Explicit user requirements take precedence. Seedance 2.5 editing uses `duration=-1` and `ratio=adaptive`; never truncate input to reduce cost. Extension needs a resolved resolution and duration and must preserve requested audio/continuity. Do not silently switch a named model to a cheaper one.
-4. Prepare one common request for supplier comparison. If multiple suppliers have keys configured and the user has not selected one, first run `media.py estimate-cost --workdir <workdir>` to calculate each compatible supplier’s quote, then read each cost.json to assemble the quotes in the confirmation sheet. Keep model, prompt, media, resolution, duration and options comparable. Verify supplier-specific asset IDs and cost-result limitations independently. Do not silently choose the cheapest, compare unlike currencies, call suppliers just to compare, or reuse portrait trust/asset IDs across suppliers or accounts. For an explicit single-provider request, specify that provider in the task configuration.
-5. Generate and display the sheet following [step 5](#5-generate-the-confirmation-and-obtain-confirmation); do not duplicate its format or supplier list here.
-6. Obtain the actual native selection following step 5 and its template. End the confirmation turn before paid execution; preselection or silence never confirms.
-7. Only after the user's current supplier selection and confirmation, submit the selected task configuration with `submit --request <task-spec.json> --workdir <workdir> --approval-text <actual choice>`. The command reads `<workdir>/<provider>/cost.json` directly; it does not require plan or comparison files. Provider `submit`, `status`, and `download` commands need outbound network access; when the default command sandbox blocks network/DNS, run them through `exec_command` with `sandbox_permissions: "require_escalated"` and a concise reason. Do not first attempt a paid POST in the restricted sandbox: Python DNS failure can produce `URLError` before the request reaches the provider. Each confirmation permits one paid attempt. After the previous task reaches a known terminal state and the user confirms again, the same workdir permits a new submission with an incremented submit-NNN.json record. Active or unknown submissions must be queried/reconciled first; never automatically retry or fail over. Unknown cost upper bounds require explicit acceptance before using `--accept-uncertain-cost`. Any change to prompt, media, price, model, quantity or parameters invalidates approval; update the task configuration, reprice when billing inputs change, and ask again.
-8. Submit once. Poll `status --wait 45` in bounded intervals. A queued/running task is not complete. Download into the temporary working directory on success, copy only final deliverables to the output directory as described under File storage, preserve original bytes and layer placement metadata, and provide absolute local file links/previews. Report API usage separately from estimates; report actual money only after verified billing data.
-
-When a user asks for a cURL example for a prepared or approved request, use `compile_request` on the selected task configuration and copy its `payload_template` and prompt exactly; after submission read `execution.compiled` from submit-NNN.json. Do not rebuild or normalize parameters from the confirmation text. For Seedream 5.0 Pro/Flash, preserve a resolution tier such as `1K`; the ratio is prompt guidance and is not a separate API field. If the request explicitly uses pixel dimensions, validate them against the model's documented total-pixel and aspect-ratio limits. Keep `output_format`, `response_format`, `watermark`, and other approved fields unchanged. A shell `curl` command does not automatically load project `.env`; use a safe data-only loader to read the selected key from project `.env`; never `source`/execute the file or expose the key in output.
-
-
-
-## Failure and recovery
-
-- Never auto-retry a paid POST. A timeout, `URLError`, server error or interruption may mean the request was accepted or charged even when no response/task ID arrived. This is a transport-level unknown outcome, not proof of provider rejection. Use the persisted job state; reconcile with the selected supplier console/account before recovery. When only `URLError` is known, do not claim whether DNS, proxy, TLS, firewall or timeout caused it. Never automatically fail over to another supplier. A supplier switch needs a new plan and confirmation. Do not clear `submit-NNN.json` to bypass duplicate protection.
-- Status and download GET requests may be repeated. Do not regenerate because a URL expired or a download failed; save outputs promptly because supplier URLs generally expire after 24 hours.
-- A failed task, partial response or provider rejection is not success. Explain the provider status/error, propose a focused change and prepare a new task confirmation before another paid attempt. Avoid repeated subjective retries.
-- Do not automatically crop or transcode trusted portrait inputs. Track supplier/account provenance, creation time and original hashes. Follow the official portrait paths in the relevant references.
-- Supported scope: four Seedance models and Seedream Pro/Flash standard generation, editing and layer decomposition. Draft-to-final, native video search, interactive canvas selection, automatic storage upload, stitching and additional suppliers are not implemented. Do not send unchecked raw parameters; add reviewed adapter capabilities when requested.
-
-## Validation
-
-For code changes, run `python3 -m unittest discover -s <skill-dir>/tests -v`. Tests mock paid calls and do not prove live model access or output quality. Never run paid smoke tests without a task confirmation and the user's current approval. Refresh official sources when model capabilities or prices may have changed.
+依据用户已确认的要求及对应能力的成功标准检查供应商状态、预期输出数量、文件完整性，以及环境可观察的产品细节、身份、文字、顺序、音频和时长。排队、运行中或 API 接受请求均不等于完成；无法核验的内容应说明。只将最终媒体复制到交付目录，图层拆分同时交付位置元数据，提供绝对路径链接或预览。过程文件保留在临时目录。区分预估、API usage 与已核验账单；需要再次付费修正时重新确认。

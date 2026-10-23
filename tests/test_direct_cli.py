@@ -11,7 +11,7 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from core import jobs
 from core.request import ROOT
-from core.costing import calculate
+from cost_fixture import calculate
 from providers import volcengine
 from config_fixture import config_fixture
 
@@ -47,7 +47,7 @@ class DirectCLI(unittest.TestCase):
         post.assert_called_once()
 
     def test_removed_commands_are_unavailable(self):
-        for command in ['prepare','compare','show']:
+        for command in ['prepare','compare','show','attach-task']:
             result=subprocess.run([sys.executable,str(ROOT/'scripts/media.py'),command],cwd=self.work,
                                   text=True,capture_output=True)
             self.assertEqual(result.returncode,2)

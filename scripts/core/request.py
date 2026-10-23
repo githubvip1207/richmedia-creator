@@ -1,6 +1,6 @@
-# 请求编译器：把通用任务规格转换为供应商专属的 API 模板与确认单选项。
+# 请求编译器：把通用任务规格转换为供应商专属的 API 模板。
 # 此处只做离线检查；远程素材尺寸、可访问性和账户权限不能靠编译结果证明。
-"""Compile an explicit operation into a validated request and confirmation options."""
+"""Compile an explicit operation into a validated request."""
 import copy
 import json
 import math
@@ -8,11 +8,10 @@ import re
 from pathlib import Path
 from .assets import inspect_asset
 from .operations import internal_operation
-from providers import PROVIDERS, resolve_provider, get_provider
+from providers import PROVIDERS, resolve_provider
 
 # ROOT 始终指向技能根目录；各供应商使用独立模型 JSON，不按字符串前缀猜测能力。
 ROOT = Path(__file__).resolve().parents[2]
-CATALOG = json.loads((ROOT / 'models/volcengine.json').read_text())
 CATALOGS = {name: json.loads((ROOT / 'models' / p['catalog']).read_text()) for name,p in PROVIDERS.items()}
 RATIOS = ['16:9', '4:3', '1:1', '3:4', '9:16', '21:9', 'adaptive']
 
@@ -29,22 +28,23 @@ def number(value):
 
 
 def compile_native_image(spec):
-    """Validate a Volcengine text-to-image envelope without rewriting its payload."""
+    """Validate the selected supplier's text-to-image body without rewriting it."""
     allowed = {'provider', 'operation', 'original_prompt', 'payload',
                'estimate_context', 'budget_cny', 'budget_usd', 'fx'}
     require(not (set(spec) - allowed), 'Unsupported native request envelope fields')
-    require(spec.get('provider') == 'volcengine' and spec.get('operation') == 'text-to-image',
-            'Native payload currently supports Volcengine text-to-image only')
+    provider = spec.get('provider')
+    require(provider in ('volcengine', 'byteplus') and spec.get('operation') == 'text-to-image',
+            'Native image payload requires a supported supplier and text-to-image')
     internal_operation(spec)
     payload = copy.deepcopy(spec['payload'])
     require(isinstance(payload, dict), 'payload must be an object')
     fields = {'model', 'prompt', 'size', 'output_format', 'response_format', 'watermark',
               'background', 'optimize_prompt_options', 'layer_decomposition'}
     require(not (set(payload) - fields), 'Unsupported native image payload fields: ' + str(sorted(set(payload) - fields)))
-    models = CATALOGS['volcengine']['models']
+    models = CATALOGS[provider]['models']
     alias = next((k for k, v in models.items() if v['id'] == payload.get('model')), None)
     require(alias is not None and 'text-to-image' in models[alias]['operations'],
-            'payload.model must be an exact supported Volcengine image model ID')
+            'payload.model must be an exact image model ID belonging to the selected supplier')
     prompt = payload.get('prompt')
     require(isinstance(prompt, str) and bool(prompt.strip()), 'payload.prompt is required')
     # Omitted fields use API defaults for billing/download metadata only; never insert them into payload.
@@ -53,7 +53,7 @@ def compile_native_image(spec):
               'optimize_prompt_options': {'mode': 'standard'}}
     params.update({k: v for k, v in payload.items() if k in params})
     from .costing import compile_cost_inputs
-    compile_cost_inputs({'provider': 'volcengine', 'model': alias, 'operation': 'text-to-image',
+    compile_cost_inputs({'provider': provider, 'model': alias, 'operation': 'text-to-image',
                          'size': params['size']})
     require(params['output_format'] in models[alias]['formats'], 'Invalid output_format')
     require(params['response_format'] in ('url', 'b64_json'), 'Invalid response_format')
@@ -65,19 +65,118 @@ def compile_native_image(spec):
     for key in ('budget_cny', 'budget_usd'):
         if key in spec:
             require(number(spec[key]) and spec[key] > 0, key + ' must be positive')
-    return {'provider': 'volcengine', 'model': alias, 'kind': 'image',
+    return {'provider': provider, 'model': alias, 'kind': 'image',
             'operation': 'text-to-image', 'prompt': prompt, 'assets': [],
-            'parameters': params, 'options': {}, 'payload_template': payload,
+            'parameters': params, 'payload_template': payload,
             'warnings': [], 'quantity': 1, 'optimizer': None,
             'original_prompt': spec.get('original_prompt')}
 
 
+def compile_native_request(spec, measured_assets=None):
+    """Validate the native API body; keep it unchanged for the actual POST."""
+    if spec.get('operation') == 'text-to-image':
+        return compile_native_image(spec)
+    allowed = {'provider', 'operation', 'mode', 'original_prompt', 'payload', 'optimizer',
+               'estimate_context', 'budget_cny', 'budget_usd', 'fx'}
+    require(not (set(spec) - allowed), 'Unsupported native request envelope fields')
+    require(spec.get('provider') == 'volcengine', 'Native payload requires Volcengine')
+    op = internal_operation(spec)
+    body = copy.deepcopy(spec.get('payload'))
+    require(isinstance(body, dict), 'payload must be an object')
+    models = CATALOGS['volcengine']['models']
+    alias = next((k for k, v in models.items() if v['id'] == body.get('model')), None)
+    require(alias is not None, 'payload.model must be an exact supported Volcengine model ID')
+    video = models[alias]['kind'] == 'video'
+    assets = []
+    evidence = measured_assets
+    if evidence is not None:
+        require(isinstance(evidence, list), 'Measured cost assets must be an array')
+
+    def asset(kind, source, role):
+        require(isinstance(source, str) and source.startswith(('https://', 'asset://')),
+                'Native media URLs must be HTTPS or supported supplier asset IDs; do not persist Base64 or local paths in payload')
+        metadata = {}
+        index = len(assets)
+        if evidence is not None:
+            require(index < len(evidence) and evidence[index].get('kind') == kind
+                    and evidence[index].get('source') == source,
+                    'Native payload media differs from measured cost assets; re-estimate and confirm')
+            metadata = {k: v for k, v in evidence[index].items() if k not in ('id', 'kind', 'source')}
+        # API roles are sufficient for local validation; business purposes stay in request.json.
+        item = {'kind': kind, 'source': source, 'role': role, 'purpose': role, 'metadata': metadata}
+        if source.startswith('asset://'):
+            item['provenance'] = {'provider': 'volcengine'}
+        assets.append(item)
+
+    if video:
+        fields = {'model', 'content', 'resolution', 'ratio', 'duration', 'generate_audio',
+                  'watermark', 'output_format', 'return_last_frame', 'execution_expires_after',
+                  'priority', 'callback_url', 'safety_identifier', 'service_tier', 'omni_reference_task_type'}
+        require(not (set(body) - fields), 'Unsupported native video payload fields')
+        # Explicit output settings avoid estimating one set of defaults and POSTing another.
+        require({'resolution', 'ratio', 'duration', 'generate_audio', 'watermark'} <= set(body),
+                'Native video payload requires explicit resolution, ratio, duration, generate_audio and watermark')
+        content = body.get('content')
+        require(isinstance(content, list) and bool(content), 'payload.content must be a nonempty array')
+        texts = []
+        for item in content:
+            require(isinstance(item, dict), 'Each content item must be an object')
+            if item.get('type') == 'text':
+                require(set(item) == {'type', 'text'} and isinstance(item.get('text'), str), 'Invalid text content')
+                texts.append(item['text'])
+            else:
+                key = item.get('type')
+                require(key in ('image_url', 'video_url', 'audio_url') and set(item) == {'type', key, 'role'},
+                        'Invalid native media content or missing role')
+                require(isinstance(item[key], dict) and set(item[key]) == {'url'}, 'Invalid native media URL object')
+                asset(key.split('_')[0], item[key]['url'], item['role'])
+        require(len(texts) == 1 and bool(texts[0].strip()), 'Provide exactly one nonempty text content item')
+        prompt = texts[0]
+        params = {k: copy.deepcopy(v) for k, v in body.items() if k not in ('model', 'content', 'service_tier', 'omni_reference_task_type')}
+        require(body.get('service_tier', 'default') == 'default', 'Only default service tier is implemented')
+        expected = {'reference-to-video': 'reference', 'edit-video': 'edit', 'extend-video': 'extend'}.get(op)
+        if alias == 'seedance-2.5' and expected:
+            require(body.get('omni_reference_task_type') == expected, 'Native task type must match operation/mode')
+        else:
+            require('omni_reference_task_type' not in body, 'Task type does not apply to this model/operation')
+        require(alias == 'seedance-2.5' or 'output_format' not in body,
+                'Seedance 2.0 has fixed MP4 output; omit output_format')
+    else:
+        fields = {'model', 'prompt', 'image', 'size', 'output_format', 'response_format',
+                  'watermark', 'background', 'optimize_prompt_options', 'layer_decomposition'}
+        require(not (set(body) - fields), 'Unsupported native image payload fields')
+        require(body.get('layer_decomposition', False) is (op == 'decompose-layers'),
+                'layer_decomposition must match operation')
+        images = body.get('image')
+        images = [images] if isinstance(images, str) else images
+        require(isinstance(images, list), 'payload.image must be a URL or URL array')
+        for source in images:
+            asset('image', source, 'reference_image')
+        prompt = body.get('prompt', '')
+        # These are API defaults for validation/billing, never inserted into the native body.
+        params = {'size': 'auto' if op == 'decompose-layers' else '2K',
+                  'output_format': 'jpeg', 'response_format': 'url', 'watermark': True,
+                  'background': 'opaque', 'optimize_prompt_options': {'mode': 'standard'}}
+        params.update({k: copy.deepcopy(v) for k, v in body.items() if k in params})
+        params['ratio'] = 'auto' if op == 'decompose-layers' else '1:1'
+    if evidence is not None:
+        require(len(assets) == len(evidence), 'Native payload media differs from measured cost assets')
+    validation = {k: copy.deepcopy(v) for k, v in spec.items() if k not in ('payload',)}
+    validation.update(model=alias, prompt=prompt, parameters=params, assets=assets)
+    compiled = compile_request(validation)
+    # The legacy compiler is used for checks only: its defaults/prompt additions are not posted.
+    compiled.update(payload_template=body, prompt=prompt, native_payload=True)
+    if not video:
+        compiled['parameters'].pop('ratio', None)
+    return compiled
+
+
 # 校验顶层字段、供应商模型、操作、提示词及素材，随后分别编译视频或图片请求。
 # 返回 API 模板、参数、确认单选项和未验证事项；模板中的素材索引稍后才替换为实际内容。
-def compile_request(spec):
+def compile_request(spec, measured_assets=None):
     require(isinstance(spec, dict), 'Request must be an object')
     if 'payload' in spec:
-        return compile_native_image(spec)
+        return compile_native_request(spec, measured_assets)
     # 先拒绝未知顶层字段，避免忽略拼写错误或把未审查参数送至供应商。
     unknown = set(spec) - {'provider', 'model', 'operation', 'mode', 'prompt', 'original_prompt', 'parameters',
                            'assets', 'optimizer', 'estimate_context', 'budget_cny', 'budget_usd', 'fx'}
@@ -106,26 +205,13 @@ def compile_request(spec):
     require(not (m['kind'] == 'image' and any(x['transport'] == 'asset' for x in a)),
             'Seedream image API accepts URLs/Base64, not asset:// IDs')
     warnings = []
-    # 保留当前值、可选值与来源用于确认单；它们与实际 payload 分开管理。
-    options = {
-        'provider': {'options':list(PROVIDERS),'current':provider,'origin':'independent supplier selection'},
-        'model': {'options':[v['id'] for v in catalog['models'].values() if v['kind'] == m['kind']],
-                  'current':m['id'],'origin':'explicit'},
-        'operation': {'options':m['operations'],'current':spec['operation'],'origin':'resolved from user intent'},
-        'request_count': {'options':[1],'current':1,'origin':'one confirmed task per paid request'}
-    }
 
-    if spec.get('mode') is not None:
-        options['mode'] = {'options': m['modes'][spec['operation']], 'current': spec['mode'], 'origin': 'explicit'}
 
-    # 统一填默认值并校验类型或可选范围，同时记录参数来自用户显式输入还是任务默认规则。
-    # 确认单依赖 options 展示可选值；运行时参数仍保存在 p 中用于构造请求。
+    # 填充默认值并校验类型及范围；运行参数保存在 p 中用于构造请求。
     def setting(key, default, choices, predicate=None):
         if key not in p:
             p[key] = default
         require(predicate(p[key]) if predicate else p[key] in choices, 'Invalid ' + key + ': ' + str(p[key]))
-        options[key] = {'options': choices, 'current': p[key],
-                        'origin': 'explicit' if key in spec.get('parameters', {}) else 'default/operation rule'}
 
     # 视频参数路径：仅开放经过适配的字段，明确限制编辑、延长和首尾帧模式。
     if m['kind'] == 'video':
@@ -153,12 +239,6 @@ def compile_request(spec):
             setting(key, None, 'optional HTTPS URL' if key == 'callback_url' else 'optional ASCII string <=64 chars',
                     lambda v, k=key: v is None or (isinstance(v, str) and
                     (v.startswith('https://') if k == 'callback_url' else v.isascii() and 0 < len(v) <= 64)))
-        # 固定能力仅用于说明：不伪造模型不支持的 seed、关键帧控制、搜索或草稿参数。
-        options.update({'framespersecond': {'options': [24], 'current': 24, 'origin': 'fixed by model; not sent'},
-                        'service_tier': {'options': ['default'], 'current': 'default', 'origin': 'only supported tier'},
-                        'draft': {'options': [False], 'current': False, 'origin': 'v1 standard generation only'},
-                        'tools': {'options': [[]], 'current': [], 'origin': 'v1 does not enable search'},
-                        'seed/camera_fixed/frames': {'options': [], 'current': None, 'origin': 'not supported by these model APIs'}})
         for x in a:
             kind = x['kind']
             x.setdefault('role', 'reference_' + kind)
@@ -189,9 +269,6 @@ def compile_request(spec):
         if alias == 'seedance-2.5' and op in ('reference-to-video', 'edit-video', 'extend-video'):
             task_type = {'reference-to-video': 'reference', 'edit-video': 'edit', 'extend-video': 'extend'}[op]
             p['omni_reference_task_type'] = task_type
-            options['omni_reference_task_type'] = {'options': ['reference', 'edit', 'extend'], 'current': task_type, 'origin': 'operation rule'}
-        elif alias == 'seedance-2.5':
-            options['omni_reference_task_type'] = {'options': [], 'current': None, 'origin': 'not applicable to text/first-frame mode'}
         p['service_tier'] = 'default'
         # 先用素材索引构建可审计模板，待提交时再将索引替换为地址或 Base64。
         content = [{'type': 'text', 'text': prompt}]
@@ -255,8 +332,6 @@ def compile_request(spec):
                     'Transparent output needs a single verified alpha-channel input, PNG output, image editing mode')
         mode = {'mode': 'standard'}
         setting('optimize_prompt_options', mode, [{'mode': 'standard'}] + ([{'mode': 'fast'}] if alias.endswith('pro') else []))
-        options.update({'layer_decomposition': {'options': [False, True], 'current': op == 'decompose-layers', 'origin': 'operation rule'},
-                        'stream/sequential_image_generation/tools': {'options': [], 'current': None, 'origin': 'not supported by Pro/Flash'}})
         # ratio 不发送给图片 API，而是追加为构图文字；其余已校验字段直接固定进模板。
         payload = {'model': m['id'], **{k:v for k,v in p.items() if k != 'ratio'}, 'layer_decomposition': op == 'decompose-layers'}
         if p['ratio'] != 'auto':
@@ -300,6 +375,6 @@ def compile_request(spec):
             require(number(spec[key]) and spec[key] > 0, key + ' must be positive')
     return {'provider': provider, 'model': alias, 'kind': m['kind'], 'operation': spec['operation'],
             **({'mode': spec['mode']} if spec.get('mode') is not None else {}),
-            'prompt': prompt, 'assets': a, 'parameters': p, 'options': options,
+            'prompt': prompt, 'assets': a, 'parameters': p,
             'payload_template': payload, 'warnings': warnings, 'quantity': 1,
             'optimizer': spec.get('optimizer'), 'original_prompt': spec.get('original_prompt')}

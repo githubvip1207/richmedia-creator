@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from config_fixture import config_fixture
 from core import jobs
 from cost_fixture import save_with_cost
-from core.request import compile_request, CATALOG, ROOT
+from core.request import compile_request, CATALOGS, ROOT
 from core.estimate import estimate
 from providers import volcengine
 
@@ -51,13 +51,13 @@ def png():
 class ModelBehavior(unittest.TestCase):
     # 遍历国内六种模型，检查逻辑别名映射到目录中的准确供应商模型 ID。
     def test_all_six_models_compile(self):
-        for alias,m in CATALOG['models'].items():
+        for alias,m in CATALOGS['volcengine']['models'].items():
             spec = video(alias) if m['kind']=='video' else {'provider':'volcengine','model':alias,'operation':'text-to-image','prompt':'红色杯子','parameters':{'ratio':'1:1'}}
             self.assertEqual(compile_request(spec)['payload_template']['model'],m['id'])
 
     # 验证视频默认 480p、4 秒且无生成音频；用户明确的分辨率、时长和音频要求优先。
     def test_low_cost_defaults_and_explicit_requirements(self):
-        for alias,m in CATALOG['models'].items():
+        for alias,m in CATALOGS['volcengine']['models'].items():
             if m['kind']!='video':
                 continue
             p = compile_request(video(alias))['parameters']

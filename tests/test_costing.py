@@ -10,7 +10,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from core import jobs
-from core.costing import calculate, consume_quote
+from core.costing import consume_quote
+from cost_fixture import calculate
 from core.request import ROOT
 
 

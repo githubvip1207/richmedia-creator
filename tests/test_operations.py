@@ -6,7 +6,8 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from core.operations import OPERATIONS, internal_operation
 from core.request import CATALOGS, compile_request
-from core.costing import calculate, consume_quote
+from core.costing import consume_quote
+from cost_fixture import calculate
 from core.cost_assets import calculate_asset_inputs
 from test_media import video, asset
 

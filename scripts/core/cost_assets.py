@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from urllib.parse import urlsplit
-from .request import require, number
+from .request import require
 
 
 def probe_asset(asset):
@@ -43,6 +43,9 @@ def probe_asset(asset):
             w, h = stream['width'], stream['height']
             require(type(w) is int and type(h) is int and w > 0 and h > 0, 'Invalid media dimensions')
             metadata.update(width=w, height=h)
+            if kind == 'image':
+                pixel_format = stream.get('pix_fmt', '')
+                metadata['has_alpha'] = pixel_format in ('rgba', 'bgra', 'argb', 'abgr', 'ya8', 'ya16be', 'ya16le') or pixel_format.startswith(('yuva', 'gbrap'))
         if kind in ('video', 'audio'):
             duration = stream.get('duration')
             if duration in (None, 'N/A'):

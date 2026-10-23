@@ -52,11 +52,6 @@ def dependency_paths():
     return [codex/'skills/sd25-pe/SKILL.md', Path.home()/'.agents/skills/sd25-pe/SKILL.md']
 
 
-# 返回第一个真实存在的依赖入口；仅验证文件存在，不代表已应用提示词优化。
-def dependency():
-    return next((str(p) for p in dependency_paths() if p.is_file()), None)
-
-
 # 对任务目录的 .lock 加非阻塞排他文件锁，防止多个进程并发提交或覆盖状态。
 # 退出时释放锁；持久化提交记录 负责跨进程退出后的重复提交保护。
 @contextlib.contextmanager
@@ -158,7 +153,8 @@ def submit(jobdir, spec, approval_text, accept_uncertain=False):
             else:
                 require(isinstance(result.get('data'),list) and bool(result['data']), 'Image response missing output data')
                 errors = [x.get('error') for x in result['data'] if x.get('error')]
-                state.update(state='partial_failed' if errors else 'succeeded',usage=result.get('usage'), errors=errors)
+                image_state = 'failed' if len(errors) == len(result['data']) else ('partial_failed' if errors else 'succeeded')
+                state.update(state=image_state,usage=result.get('usage'), errors=errors)
         # 有不确定性的供应商错误或响应处理异常保留 submission_unknown；明确拒绝才记 rejected。
         except Exception as exc:
             state.update(state='submission_unknown' if not isinstance(exc,ProviderError) or exc.uncertain else 'rejected',
@@ -170,7 +166,7 @@ def submit(jobdir, spec, approval_text, accept_uncertain=False):
         return state
 
 
-# 在固定供应商上查询已有视频任务，使用单调时钟把单次等待限制在 0..45 秒。
+# 在固定供应商上查询已有视频任务，使用单调时钟把单次等待限制在 0..600 秒。
 # 图片同步请求或缺少任务 ID 时只返回现存状态，不通过查询创建新生成。
 def status(submission, wait=0):
     path = submission_path(submission)
@@ -180,18 +176,27 @@ def status(submission, wait=0):
         adapter = get_provider(state['compiled']['provider'])['adapter']
         if state['compiled']['kind'] == 'image' or not state.get('task_id'):
             return state
-        deadline = time.monotonic() + min(max(wait, 0), 45)
+        wait = min(max(wait, 0), 600)
+        deadline = time.monotonic() + wait
         while True:
-            result = query_submission(record, path, adapter, state['task_id'])
+            # 不在截止时间后开始新查询；单次请求超时不超过剩余等待时间。
+            if wait:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return state
+                result = query_submission(record, path, adapter, state['task_id'], timeout=min(25, remaining))
+            else:
+                result = query_submission(record, path, adapter, state['task_id'])
             require(result.get('id', state['task_id']) == state['task_id'], 'Provider returned a different task ID')
             state.update(state=result.get('status','unknown'), updated_at=now(), usage=result.get('usage'), error=result.get('error'))
             write(path, record)
-            if state['state'] not in ('queued','running') or time.monotonic() >= deadline:
+            remaining = deadline - time.monotonic()
+            if state['state'] not in ('queued','running') or not wait or remaining <= 0:
                 return state
-            time.sleep(min(10,max(0,deadline-time.monotonic())))
+            time.sleep(min(10, remaining))
 
 
-def query_submission(record, path, adapter, task_id):
+def query_submission(record, path, adapter, task_id, timeout=None):
     """Retain every status GET separately; keep the original POST response unchanged."""
     from urllib.parse import quote
     query = {'requested_at': now(), 'request': {'method': 'GET',
@@ -199,29 +204,13 @@ def query_submission(record, path, adapter, task_id):
     record.setdefault('queries', []).append(query)
     write(path, record)
     try:
-        query['response'] = adapter.status(task_id)
+        query['response'] = adapter.status(task_id) if timeout is None else adapter.status(task_id, timeout=timeout)
     except Exception as exc:
         query['error'] = str(exc) if isinstance(exc, ProviderError) else type(exc).__name__
         write(path, record)
         raise
     write(path, record)
     return query['response']
-
-
-def attach_task(submission, task_id):
-    """Reconcile an unknown outcome without creating another paid task."""
-    path = submission_path(submission)
-    with lock(path.parent):
-        record = read(path)
-        state = record['execution']
-        require(state['state'] in ('submitting','submission_unknown') and not state.get('task_id'),
-                'Only reconcile an unknown submission without task ID')
-        compiled = state['compiled']
-        result = query_submission(record, path, get_provider(compiled['provider'])['adapter'], task_id)
-        require(result.get('id') == task_id and result.get('model') == compiled['payload_template']['model'], 'Task identity/model mismatch')
-        state.update(task_id=task_id,state=result.get('status','unknown'),updated_at=now())
-        write(path, record)
-        return state
 
 
 # 检查 PNG/JPEG/WebP 或 MP4/MOV 容器的基本文件头，排除明显的错误页面。
@@ -284,6 +273,9 @@ def download(submission):
                            if isinstance(q.get('response'), dict) and q['response'].get('id', state['task_id']) == state['task_id']), result)
         plan = state
         require(state['state'] in ('succeeded','partial_failed'), 'Task not completed successfully; query status first')
+        # 旧完成标记不能代表本次检查结果；失败时保留 false，完整清单仍用于恢复。
+        state['download_complete'] = False
+        write(record_path, record)
         output = d/'outputs'/record_path.stem
         output.mkdir(mode=0o700,parents=True,exist_ok=True)
         # 图片保留每个非错误 data 项；视频同时处理主视频和可选末帧。

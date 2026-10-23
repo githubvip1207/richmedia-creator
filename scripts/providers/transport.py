@@ -6,7 +6,6 @@ from core.envfile import config_value
 import re
 import urllib.error
 import urllib.request
-from urllib.parse import quote
 from core.assets import materialize
 
 # 供应商错误类型：uncertain 标记提交是否可能已被接受或计费。
@@ -27,7 +26,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 # 用所选供应商密钥构造 JSON 请求，限制请求体为 64 MiB，且只接受对象响应。
 # POST 超时 180 秒、其他请求 25 秒；任何失败都交回调用方处理，不在此循环重试。
-def request(base, key_env, provider_name, method, path, payload=None):
+def request(base, key_env, provider_name, method, path, payload=None, *, timeout=None):
     # 只读取 .env 中当前适配器指定的密钥配置，缺失时在构造网络请求之前停止。
     key = config_value(key_env)
     if not key:
@@ -38,8 +37,11 @@ def request(base, key_env, provider_name, method, path, payload=None):
     # Authorization 只附加给固定 API 主机；不把密钥写到 payload、计划或错误消息。
     req = urllib.request.Request(base + path, data=data, method=method,
                                  headers={'Authorization':'Bearer '+key, 'Content-Type':'application/json'})
+    request_timeout = 180 if method == 'POST' else 25
+    if timeout is not None:
+        request_timeout = min(request_timeout, timeout)
     try:
-        with urllib.request.build_opener(NoRedirect).open(req, timeout=180 if method == 'POST' else 25) as response:
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=request_timeout) as response:
             result = json.load(response)
             if not isinstance(result, dict):
                 raise ValueError('Non-object API response')
@@ -83,6 +85,8 @@ def request(base, key_env, provider_name, method, path, payload=None):
 def payload(plan):
     data = json.loads(json.dumps(plan['compiled']['payload_template']))
     assets = plan['compiled']['assets']
+    if plan['compiled'].get('native_payload'):
+        return data
     # 图片用独立 image 数组；视频按 content 中的 asset_index 回填并保留角色。
     if plan['compiled']['kind'] == 'image':
         if assets:

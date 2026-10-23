@@ -1,7 +1,6 @@
 """项目 .env 配置及汇率有效期；不执行文件，不读取业务环境变量。"""
 import datetime as dt
 import math
-import re
 from pathlib import Path
 
 ALLOWED = {'VOLCENGINE_API_KEY', 'BYTEPLUS_API_KEY', 'USD_CNY', 'USD_CNY_EXPIRES_AT'}

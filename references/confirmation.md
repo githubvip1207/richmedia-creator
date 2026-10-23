@@ -1,54 +1,54 @@
-# Task confirmation and user selection
+# 任务确认单与用户选择
 
-## Data sources
+## 数据来源
 
-Use the requirements in request.json, the current optimized prompt and parameters, and the saved estimate in each supplier's cost.json. Do not recalculate prices.
+根据 `request.json` 记录的需求、本次已确定的优化提示词和参数，以及各供应商 `cost.json` 中的估价生成确认单，不重新计算价格。
 
-Resolve supplier names from PROVIDERS in scripts/providers/__init__.py. Offer generation only for suppliers meeting the task prerequisites. If the user specified a supplier, show only that supplier; if none is available, explain why.
+供应商名称从 `scripts/providers/__init__.py` 的 `PROVIDERS` 注册表读取。仅为满足调用条件的供应商提供生成选项；用户已指定供应商时只展示该家，没有可用供应商时说明原因。
 
-## Display format
+## 展示格式
 
-Place the complete sheet directly in the **final response body**, not inside a code block or replaced by an attachment or tool output.
+将完整确认单直接放入 **final 回复正文**，不使用代码块、附件或工具输出代替。
 
 ```markdown
 # 任务确认单
 
-提示词：{Complete optimized prompt; explain prompt-free automatic decomposition when applicable}
+提示词：{完整优化提示词；自动图层拆分说明无需提示词}
 
 参数概要：
 
-- 模型：{Current model} [{Available models}]
-- 比例：{Current ratio} [{Available ratios}]
-- 分辨率：{Image tier/exact pixels or video resolution} [{Available values}]
-- 数量：{Current count} [{Available values}]
-{Add video duration and other applicable settings in the same list format}
+- 模型：{当前模型} [{可选模型}]
+- 比例：{当前比例} [{可选比例}]
+- 分辨率：{当前尺寸档位、准确像素或视频分辨率} [{可选值}]
+- 数量：{当前数量} [{可选值}]
+{视频增加时长；其他适用参数沿用上述列表格式}
 
 费用预估：
 
-- {Supplier name}：{Native-currency amount/range/unknown; add CNY conversion when valid}
-{One item per supplier}
+- {供应商名称}：{原币金额、区间或未知；有有效汇率时附人民币换算}
+{每家供应商单独一项}
 
 生成提示：
 
-- {Applicable FX and expiration, cost uncertainty or decision-relevant limits}
+- {适用的汇率及过期时间、费用不确定项或影响本次选择的限制}
 - 实际费用以供应商结算为准。
 
-请选择供应商确认生成，或选择“我再想想”。
+请选择供应商确认生成，或选择“我再想想”调整选项。
 ```
 
-- List only values supported by the current model and operation. Note any differences between supplier offers.
-- Use amounts, FX and expiration from the saved cost results. Keep native currency without valid FX and explicitly label unknown upper costs.
-- Hide tokens, price-snapshot sources, API endpoints, credentials and other internal fields.
+- 可选值以当前模型和能力实际支持的范围为准；供应商方案有差异时，注明差异。
+- 金额、汇率及有效期以成本结果为准；无有效汇率时保留原币，费用上界未知时明确标注。
+- 不展示 Token、价格快照来源、API 端点、凭证和其他内部字段。
 
-## User selection
+## 用户选择
 
-Use request_user_input_async for selectable options and optional free-text input. The call returns immediately; the actual answer arrives in a subsequent user message.
+使用 `request_user_input_async` 展示选项。该工具既支持选项，也允许用户自由输入；调用立即返回，实际回答通过后续用户消息到达。
 
-1. Generate one `{供应商名称}，确认生成` option per eligible supplier. For unknown upper costs use `{供应商名称}，接受费用上界未知并确认生成`. Append only `我再想想`.
-2. After calling the tool, end the turn with the complete sheet in the final response. Execute the chosen supplier only after receiving an actual generation selection, without asking for a second confirmation. See the [CLI manual](usage.md) for submission.
-3. `我再想想` leaves generation unsubmitted while awaiting further instructions. Silence, preselection or dismissal is not confirmation. Free-text changes require an updated sheet and confirmation.
+1. 按本次可用供应商生成 `{供应商名称}，确认生成` 选项；费用上界未知时改为 `{供应商名称}，接受费用上界未知并确认生成`。末尾仅追加 `我再想想`。
+2. 调用后以完整确认单作为 final 回复结束本轮。
+3. 选择 `我再想想` 时不执行生成，等待后续指示；未回复、预选或关闭控件均不算确认。用户自由输入修改需求时，更新方案并重新确认。
 
-Example (generate supplier options from this task):
+调用示例（选项由本次供应商生成）：
 
 ```javascript
 request_user_input_async({
@@ -59,4 +59,4 @@ request_user_input_async({
 })
 ```
 
-If the tool is unavailable, display the complete final sheet and wait for an explicit user reply. Do not present Markdown lists as clickable controls.
+工具不可用时，在 final 正文展示确认单并等待用户明确回复，不将 Markdown 列表当作可点击按钮。

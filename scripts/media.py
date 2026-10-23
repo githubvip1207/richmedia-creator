@@ -4,14 +4,10 @@
 """RichMedia Creator CLI (Python 3.9+, stdlib only)."""
 import argparse
 import json
-import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from core.envfile import load_project_env, fx_from_env
-# 记录当前项目 .env 的存在状态；实际配置由各命令按需读取，不导入进程环境。
-ENV_FILE = load_project_env()
+from core.envfile import fx_from_env
 from core import jobs, preflight, workspace, cost_assets
 from core.request import CATALOGS, require
 from providers import PROVIDERS
@@ -20,6 +16,28 @@ from providers import PROVIDERS
 # 将结果编码为可读 JSON，保留中文并拒绝 NaN/Infinity，方便 CLI 消费方稳定解析。
 def emit(value):
     print(json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False))
+
+
+# 命令行仅返回是否生成成功及原因；完整执行状态仍保留在提交文件中。
+def status_result(state):
+    if state.get('state') == 'succeeded':
+        return {'success': True, 'error': None}
+    error = state.get('error') or state.get('errors')
+    if error:
+        if isinstance(error, dict):
+            error = error.get('message') or json.dumps(error, ensure_ascii=False)
+        elif isinstance(error, list):
+            error = '；'.join(str(item.get('message') or json.dumps(item, ensure_ascii=False))
+                             if isinstance(item, dict) else str(item) for item in error)
+        return {'success': False, 'error': str(error)}
+    status = state.get('state', 'unknown')
+    if status in ('queued', 'running'):
+        error = '任务尚未完成（状态：' + status + '），可继续查询'
+    elif status in ('submitting', 'submission_unknown', 'unknown'):
+        error = '生成结果尚未确定（状态：' + status + '），需核对供应商记录'
+    else:
+        error = '任务未成功（状态：' + status + '），供应商未提供具体原因'
+    return {'success': False, 'error': error}
 
 
 # 注册检查、成本计算、提交、查询和下载命令。供应商取自用户所选任务配置。
@@ -41,15 +59,12 @@ def main():
     sub.add_argument('--workdir',required=True,help='Existing task directory containing <provider>/cost.json')
     sub.add_argument('--approval-text',required=True,help='Actual user reply, never generated consent')
     sub.add_argument('--accept-uncertain-cost',action='store_true')
-    # 已有任务入口：查询/下载不创建生成；attach-task 只关联已核对的现存视频任务。
+    # 已有任务入口：查询和下载不创建生成。
     status = subs.add_parser('status')
     status.add_argument('--submission',required=True,help='Path to submit-NNN.json')
-    status.add_argument('--wait',type=int,default=0,choices=range(46),metavar='0..45')
+    status.add_argument('--wait',type=int,default=0,choices=range(601),metavar='0..600')
     dl = subs.add_parser('download')
     dl.add_argument('--submission',required=True,help='Path to submit-NNN.json')
-    attach = subs.add_parser('attach-task')
-    attach.add_argument('--submission',required=True,help='Path to submit-NNN.json')
-    attach.add_argument('--task-id',required=True)
     args = parser.parse_args()
     if args.command == 'init':
         if sys.stdin.isatty():
@@ -90,11 +105,13 @@ def main():
         state = jobs.submit(args.workdir,spec,args.approval_text,args.accept_uncertain_cost)
         emit({'submission': state['submission']})
     elif args.command == 'status':
-        emit(jobs.status(args.submission,args.wait))
+        try:
+            emit(status_result(jobs.status(args.submission,args.wait)))
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
+            emit({'success': False, 'error': str(exc)})
+            sys.exit(1)
     elif args.command == 'download':
         emit(jobs.download(args.submission))
-    elif args.command == 'attach-task':
-        emit(jobs.attach_task(args.submission,args.task_id))
 
 
 if __name__ == '__main__':

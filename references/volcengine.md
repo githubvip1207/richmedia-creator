@@ -1,101 +1,237 @@
-# Volcengine integration
+# Volcengine
 
-## Capabilities
+## 模型列表
 
-Match the capability and mode identified in the main workflow, then read the corresponding operation requirements. Detailed procedures are maintained in the [Chinese supplier reference](volcengine_cn.md#能力操作说明).
+| 模型 | 类型 | 调用别名 | 模型 ID | 输出分辨率 / 尺寸档位 | 输出时长上限 | 输出格式 |
+|---|---|---|---|---|---|---|
+| Seedance 2.5 | 视频 | `seedance-2.5` | `doubao-seedance-2-5-260628` | 480p、720p、1080p | 30 秒 | mp4、mov |
+| Seedance 2.0 | 视频 | `seedance-2.0` | `doubao-seedance-2-0-260128` | 480p、720p、1080p、4k | 15 秒 | mp4 |
+| Seedance 2.0 Fast | 视频 | `seedance-2.0-fast` | `doubao-seedance-2-0-fast-260128` | 480p、720p | 15 秒 | mp4 |
+| Seedance 2.0 Mini | 视频 | `seedance-2.0-mini` | `doubao-seedance-2-0-mini-260615` | 480p、720p | 15 秒 | mp4 |
+| Seedream 5.0 Pro | 图片 | `seedream-5.0-pro` | `doubao-seedream-5-0-pro-260628` | 1K、1.5K、2K | 不适用 | png、jpeg |
+| Seedream 5.0 Flash | 图片 | `seedream-5.0-flash` | `doubao-seedream-5-0-flash-260915` | 1K、1.5K、2K | 不适用 | png、jpeg |
 
-| Capability | operation | Modes | Models | Script support | Details |
-|---|---|---|---|---|---|
-| Text-to-image | `text-to-image` | — | Seedream 5.0 Pro, Flash | Implemented | [Text-to-image](volcengine_cn.md#文生图) |
-| Image-to-image | `image-to-image` | Single-image editing, multi-image fusion, region editing | Seedream 5.0 Pro, Flash | Implemented | [Image-to-image](volcengine_cn.md#图生图) |
-| Layer decomposition | `decompose-layers` | — | Seedream 5.0 Pro, Flash | Implemented | [Layer decomposition](volcengine_cn.md#图层拆分) |
-| Text-to-video | `text-to-video` | — | Seedance 2.5, 2.0, 2.0 Fast, 2.0 Mini | Implemented | [Text-to-video](volcengine_cn.md#文生视频) |
-| Image-to-video | `image-to-video` | First frame, first and last frames | The same four Seedance models | Implemented | [Image-to-video](volcengine_cn.md#图生视频) |
-| Reference-to-video | `reference-to-video` | Reference generation, video editing | The same four Seedance models; audio-only references require 2.5 | Implemented | [Reference-to-video](volcengine_cn.md#参考生视频) |
-| Video extension | `extend-video` | Extend before, extend after | The same four Seedance models | Implemented | [Video extension](volcengine_cn.md#视频延长) |
+## 能力列表
 
-Model- and mode-specific asset requirements, parameters and limits remain in the relevant capability requirements.
+根据主流程确定的能力和模式，检查支持模型并读取对应章节。
 
-## Cost calculation
+| 能力 | 支持模式 | 支持模型 | 脚本实现 | 详细说明 |
+|---|---|---|---|---|
+| 文生图 | — | Seedream 5.0 Pro、Flash | 已实现 | [文生图](#文生图operationtext-to-image) |
+| 图生图 | 单图编辑、多图融合、局部编辑 | Seedream 5.0 Pro、Flash | 未实现 | — |
+| 图层拆分 | — | Seedream 5.0 Pro、Flash | 未实现 | — |
+| 文生视频 | — | Seedance 2.5、2.0、2.0 Fast、2.0 Mini | 未实现 | — |
+| 图生视频 | 首帧、首尾帧 | 同上四款 Seedance | 未实现 | — |
+| 参考生视频 | 参考生成、视频编辑 | 同上四款 Seedance；纯音频参考仅 2.5 | 未实现 | — |
+| 视频延长 | 向前延长、向后延长 | 同上四款 Seedance | 未实现 | — |
 
-The agent builds JSON from the capability/mode requirements; Python inspects the media, loads `models/volcengine-pricing.json`, resolves formula dependencies and calculates the estimate. Full dependency tables and annotated input examples are maintained in [cost calculation](volcengine_cn.md#预估成本).
+同一能力下，不同模式或模型的素材要求、参数和限制，见对应能力的调用要求。
 
-| Formula group | Operations | Required task settings | Media |
-|---|---|---|---|
-| Ordinary images | `text-to-image`, `image-to-image` | `size` | None for text-to-image; 1–10 images for image-to-image |
-| Layer decomposition | `decompose-layers` | `size` (tier or `auto`) | 1 image |
-| Videos | `text-to-video`, `image-to-video`, `reference-to-video`, `extend-video` | `resolution`, `ratio`, `duration` | As required by the selected mode |
+## 预估成本
 
-All requests require `provider`, `model` and one of the seven `operation` identifiers. Video capabilities with modes require top-level `mode`: image-to-video uses `first-frame|first-last-frame`; reference-to-video uses `reference|edit`; extend-video uses `before|after`. Image capabilities and text-to-video do not accept mode. Each `assets` item contains `kind`, an absolute path or HTTPS `source`, and optional asset identifier `id`. The identifier is preserved with measurements and does not affect billing. Do not supply prices, measured dimensions/durations, image counts, prompts or a price-file path. Python retains and validates audio assets even though audio duration is not added to video seconds. Text-only generation forbids assets; reference generation needs assets; 2.0 forbids audio-only reference; editing/extension needs a video.
+根据能力和用户要求构建成本参数 JSON；Python 脚本读取供应商单价描述文件，检查素材并解析计费所需的数据，最后按本节公式计算。不要让大模型填写图片数量、素材实测尺寸、素材实测时长、单价或最终金额。
+
+### 文生图、图生图计费
+
+#### 计算公式
 
 ```text
-ordinary_image_cost = output_pixel_tier_price + max(input_images - 1, 0) * extra_image_price
-layer_cost_range = [one low-tier layer price, 17 * high-tier layer price]
-formula_tokens = ceil((sum(input_video_seconds) + output_seconds) * width * height * 24 / 1024)
-billable_tokens = formula_tokens if no input video, else max(formula_tokens, minimum_billable_tokens)
-video_cost = billable_tokens * price_per_million_tokens / 1_000_000
+额外输入图片数量 = max(输入图片数量 − 1, 0)
+输出费用 = 一张输出图片对应像素档位的单价
+输入费用 = 额外输入图片数量 × 模型的额外输入图片单价
+预计费用 = 输出费用 + 输入费用
 ```
 
-Fixed ratios use the model-specific official output-pixel table. For Volcengine 2.5 first/last-frame, editing and extension, an unambiguous source with a known table aspect ratio resolves adaptive pixels at the requested resolution; source pixels are not directly substituted for output pixels. Multiple editing/extension videos can use `estimate_context.target_asset_index` (zero-based in `assets`) to identify the estimate target, consistent with the prompt. Unmappable/model-selected dimensions require a justified `estimate_context.output_dimensions=[width,height]`; otherwise the result is `unknown` with `result.uncertainties`.
+#### 返回的数据对象
 
-When input includes video, provide verified `estimate_context.minimum_billable_tokens` and `minimum_tokens_source` from the official table/calculator for the exact model/resolution/ratio/output-duration specification. A fixed duration accepts a positive number; automatic-duration intervals require a verified `[lower,upper]` floor range covering the interval. Without a verified floor, the result is only `lower_bound`, with no known upper amount. Never invent these values. See [official billing rules](https://docs.volcengine.com/docs/ark/model-pricing?lang=zh) and [output-size/adaptive rules](https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh).
+根据前两步的信息组织如下 JSON 内容，作为 estimate-cost 的输入；传给脚本前去除注释。
 
-Python measures input video durations. For 2.5 editing with `duration=-1`, use target duration minus 0.4 seconds through target duration; other automatic durations use the model's 4–30 or 4–15 second range. The saved quote and stdout contain identical JSON with `input`, `calculation` and `result`. Calculation inputs, measured assets, selected rates, assumptions and intermediate formula steps remain in `calculation` for auditing; `result` contains confirmation amounts and uncertainty reasons. Submission reuses the saved evidence; changed generation settings require re-estimation and confirmation.
+```jsonc
+{
+  "provider": "volcengine", // 必需：供应商；Python 据此读取 models/volcengine-pricing.json，不传单价或价格文件路径
+  "model": "seedream-5.0-pro", // 必需：模型别名或准确 ID；Python 读取该模型的输出费率、额外输入费率和像素阈值
+  "operation": "image-to-image", // 必需：文生图为 text-to-image，图生图为 image-to-image
+  "size": "1K", // 必需：1K、1.5K 使用低像素档，2K 使用高像素档；准确 WxH 由 Python 计算宽×高后与费率阈值比较
+  "assets": [ // 文生图省略或传 []；单图编辑 1 张、多图融合 2～10 张、局部编辑 1～10 张
+    {
+      "id": "product", // 素材标识：与初始化记录中的 id 一致，仅用于关联，不参与计费
+      "kind": "image", // 必需：此处仅接受图片，Python 检查并统计输入数量，不传手工张数
+      "source": "/absolute/path/product.png" // 必需：实际本地绝对路径或可访问 HTTPS URL；Python 读取素材尺寸，输入图尺寸不代替输出尺寸
+    },
+    {
+      "id": "background", // 素材标识：与初始化记录中的 id 一致，仅用于关联，不参与计费
+      "kind": "image", // 本例为多图融合的第二张参考图
+      "source": "/absolute/path/background.png" // 替换为实际背景素材地址；Python 保留 id 便于关联素材，按 kind、source 读取媒体信息
+    }
+  ]
+  // Pro 从第二张输入图收取附加费；Flash 是否收取由单价文件的 input_after_first 决定。
+  // 不传图片实测尺寸、输入数量或最终金额；由 Python 解析素材、读取单价并按上述公式计算。
+}
+```
 
-## API contract
+### 图层拆分计费
 
-- Images: `POST /images/generations`. Process every `data` item, including error items and decomposition layers. `response_format=url|b64_json`. Preserve `usage` and per-layer `z_index`, `bounding_box`, `name`, `description`. PNG/JPEG outputs, layers always PNG.
-- Video: `POST /contents/generations/tasks` returns `id`. Query `GET /contents/generations/tasks/{id}`; queued/running are nonterminal, succeeded/failed/expired/cancelled are terminal. Success media are in `content.video_url` and optional `content.last_frame_url`. Do not confuse API acceptance with generated media success. Report `usage.completion_tokens`/`total_tokens` as returned.
-- Video input: text plus image_url/video_url/audio_url and explicit role. First-frame and first-last-frame are mutually exclusive with multimodal reference modes. Images/audio accept HTTPS, Base64 or asset://; video accepts HTTPS or asset:// only. Seedream image API accepts URL/Base64, not asset://.
-- Local image/audio inputs are converted to Base64 in memory during submission; HTTPS URLs and existing Volcengine `asset://` IDs can also be used where the specific endpoint accepts them. The skill does not call Volcengine upload APIs or create asset IDs. Users must upload through the provider or approved storage separately, then provide the resulting asset ID or URL. Video inputs cannot be sent as Base64.
-- Results generally have 24-hour URL retention. Download promptly and keep original bytes. Expired media cannot be fixed by re-querying indefinitely; check existing storage/provider recovery before proposing a newly charged generation. In sandboxed execution environments, run API network commands with escalation if outbound DNS/network is blocked; otherwise Python `urllib` can fail locally with `URLError` before receiving any HTTP response. Transport diagnostics should retain a sanitized underlying reason (for example, `gaierror`) without secrets.
+#### 计算公式
 
-## Model-specific limits
+```text
+实际费用 = 底图费用 + 每张输出图层的费用
+生成前按可能的 1～17 份输出及像素档位估算：
+最低预计费用 = 一张低像素档图层输出的单价
+最高预计费用 = 17 × 一张高像素档图层输出的单价
+```
 
-- 2.5: video-editing mode, extension and first/last-frame mode ratio must be adaptive. Edit duration must be -1; edit input videos 4..30 s. Other input video/audio 2..30 s; per-kind total duration <=30 s. 2.0 series input video/audio 2..15 s and per-kind total <=15 s. Counts are in the catalog. 2.0 cannot accept audio-only references.
-- Video input images: width and height 300..6000; ratio 0.4..2.5; <30 MB. Video input pixel count 407696..8295044, dimensions 300..6000, ratio 0.4..2.5, FPS 24..60, <=200 MB each. Audio WAV/MP3 <=15 MB. Body <=64 MB. Inspect remote formats/dimensions before confirmation; local validation does not prove network preflight.
-- Pro/Flash: reference images <=10, <=30 MB each, dimensions >14, ratio 1/16..16, total pixels <=36 million. Layer input PNG/JPEG, single image, pixels >=262144. Standard generation supports 1K/1.5K/2K or exact pixels with total 921600..4624220 and ratio 1/16..16. Decomposition supports tier/auto only.
-- Pro/Flash standard generation: prefer the documented resolution tier (`1K`, `1.5K`, or `2K`) and describe the aspect ratio naturally in `prompt`; do not also send a `ratio` field. Common 1K mappings include 4:3 = 1152x864. Exact-pixel mode has a 921600-pixel minimum: 1024x768 is invalid (786432 pixels), while 1152x864 is valid. Do not derive dimensions by scaling a conventional 1024x768 canvas.
-- Pro/Flash image generation returns one image per request; `sequential_image_generation`/`sequential_image_generation_options.max_images` are not supported. The `image` input count (up to 10 references) is separate from output quantity. Do not advertise a multi-image quantity option for one Pro/Flash request; do not send `n` or sequential group-output fields. These models also do not support stream or web_search.
-- Seedream 5.0 Pro/Flash image request contract: required `model` (Pro: `doubao-seedream-5-0-pro-260628`; Flash: `doubao-seedream-5-0-flash-260915`) and `prompt`; optional `image` (URL or data URI/Base64; up to 10 reference images), `size`, `output_format`, `response_format`, `watermark`, `background`, `optimize_prompt_options`, and `layer_decomposition`.
-- `size`: `1K`/`1.5K`/`2K` (default API value 2K), or exact `WxH` subject to 921600..4624220 total pixels and 1/16..16 aspect ratio. Prefer a tier and describe ratio in the prompt; do not send a separate ratio field. Common mapping: 1K 4:3 = 1152x864.
-- `output_format`: `png` or `jpeg` (official API default `jpeg`; this skill explicitly defaults to `png`). `response_format`: `url` or `b64_json` (default `url`; URLs expire after 24 hours).
-- `watermark`: boolean; official API default is `true`, but this skill explicitly sends `false` by default per user preference. Honor an explicit user choice.
-- `background`: `opaque` or `transparent` (default `opaque`). Transparent output is restricted to editing one alpha-channel input and PNG output.
-- `optimize_prompt_options.mode`: `standard` for Pro and Flash; `fast` is supported by Pro only. Server-side prompt optimization is distinct from the required sd25-pe workflow.
-- `layer_decomposition`: boolean (default `false`); `true` enables layer decomposition and requires exactly one input image. Normal image generation keeps it false. Pro/Flash generate one output per request; do not send `n` or sequential-group fields.
-- Example text-to-image payload (Flash; change only the model ID to use Pro):
-  ```json
-  {
-    "model": "doubao-seedream-5-0-flash-260915",
-    "prompt": "一只小猫趴在草地上，柔和自然光，摄影质感。画面比例为4:3。",
-    "size": "1K",
-    "output_format": "png",
-    "response_format": "url",
-    "watermark": false,
-    "background": "opaque",
-    "optimize_prompt_options": {"mode": "standard"},
-    "layer_decomposition": false
+#### 返回的数据对象
+
+根据前两步的信息组织如下 JSON 内容，作为 estimate-cost 的输入；传给脚本前去除注释。
+
+```jsonc
+{
+  "provider": "volcengine", // 必需：供应商；Python 自行读取 models/volcengine-pricing.json，不传单价或文件路径
+  "model": "seedream-5.0-flash", // 必需：模型别名或准确 ID；Python 读取该模型的 layer 费率
+  "operation": "decompose-layers", // 必需：图层拆分，不提供 mode
+  "size": "auto", // 必需：auto 或模型支持的尺寸档位；不能据此确定各张未来图层的尺寸
+  "assets": [ // 必需：只能提供 1 张待拆分图片，Python 校验数量并读取尺寸
+    {
+      "id": "layer-source", // 素材标识：与初始化记录中的 id 一致，仅用于关联，不参与计费
+      "kind": "image", // 必需：图层拆分只接受图片
+      "source": "/absolute/path/product.png" // 必需：实际本地绝对路径或可访问 HTTPS URL；Python 通过 id 关联本次拆分素材
+    }
+  ]
+  // 不传未来图层数量或每层像素：生成前无法确定，Python 按 1～17 份输出及全部像素档位计算费用范围。
+  // 此范围不是承诺输出 17 张；不能用一张图的费用代表整次拆分。
+}
+```
+
+### 文生视频、图生视频、参考生视频、视频延长计费
+
+#### 计算公式
+
+```text
+参与计算的时长 = 所有输入视频总时长 + 输出视频时长
+公式 Token = 向上取整(参与计算的时长 × 输出宽 × 输出高 × 24 ÷ 1024)
+无视频输入：计费 Token = 公式 Token
+有视频输入：计费 Token = max(公式 Token, 本规格的最低计费 Token)
+预计费用 = 计费 Token × 每百万 Token 单价 ÷ 1,000,000
+```
+
+#### 返回的数据对象
+
+根据前两步的信息组织如下 JSON 内容，作为 estimate-cost 的输入；传给脚本前去除注释。
+
+```jsonc
+{
+  "provider": "volcengine", // 必需：供应商；Python 自行读取 models/volcengine-pricing.json
+  "model": "seedance-2.5", // 必需：模型别名或准确 ID；Python 根据模型、分辨率及有无视频输入选择单价
+  "operation": "image-to-video", // 必需：text-to-video 文生视频、image-to-video 图生视频、reference-to-video 参考生视频、extend-video 视频延长
+  "mode": "first-frame", // 当前视频脚本要求：图生视频 first-frame/first-last-frame；参考生视频 reference/edit；延长 before/after；文生视频不提供
+  "resolution": "480p", // 必需：所选模型支持的分辨率；与模型和比例共同确定输出宽高，不直接复用输入像素
+  "ratio": "adaptive", // 必需：固定比例按官方像素表查宽高；2.5 首帧/首尾帧、编辑、延长必须为 adaptive
+  "duration": 4, // 必需：输出秒数，或模型允许的 -1；2.5 编辑必须为 -1，Python 读取目标时长后估算 [源时长-0.4, 源时长]
+  "assets": [ // 文生视频省略或传 []；首帧 1 张图、首尾帧按顺序 2 张；参考生成必须有素材；编辑/延长必须有视频
+    {
+      "id": "first-frame", // 素材标识：与初始化记录中的 id 一致，仅用于关联，不参与计费
+      "kind": "image", // 必需：image/video/audio；2.0 不支持纯音频参考，Python 校验各类型数量及音视频时长
+      "source": "/absolute/path/first-frame.png" // 必需：实际本地绝对路径或 HTTPS URL；Python 用 ffprobe 读取宽高和时长，不传实测元数据，id 仅用于关联素材
+    }
+  ],
+  "estimate_context": { // 条件字段：仅有补充计费依据时填写；本例无额外依据可省略整个对象；这些内容不传给生成 API
+    // "target_asset_index": 0, // 多视频编辑/延长时明确目标；从 0 开始，针对整个 assets 数组，必须与提示词目标一致；单视频或首帧由 Python 自动确定
+    // "output_dimensions": [854, 480] // 仅在无法自动推导且有官方依据时填写 [输出宽, 输出高]；不是输入图尺寸，不保证实际输出像素
+    // minimum_billable_tokens：含视频输入时，从官方表格或计算器核实本模型、分辨率、比例、输出时长的最低 Token；无视频输入无需填写。
+    // 固定输出时长填写一个正数；自动时长填写覆盖完整时长范围的 [门槛下界, 门槛上界]，不得将示例数值当作真实门槛。
+    // minimum_tokens_source：填写上述门槛对应的官方表格或计算器 HTTPS URL；与 minimum_billable_tokens 一起提供。
   }
-  ```
-- The adapter does not expose seed/camera_fixed/frames (these are not supported for the chosen Seedance APIs), flex inference, draft workflows or video web_search. User-facing settings appear in the task confirmation; technical request details remain in task configuration and submission records. Unsupported options are rejected rather than ignored.
+  // Python 将全部输入视频的实测时长求和；图片、音频时长不加入该时长，输出帧率按 24 FPS 估算。
+  // 2.5 自适应首帧/首尾帧按第一张图的比例查官方输出像素表；编辑/延长按目标视频比例查表，不直接使用输入素材像素。
+  // 例如首帧为 1280×720、输出 480p 时，使用 854×480 估算；任意比例或模型自行决定的比例无法可靠推导时返回 unknown，并在 result.uncertainties 中说明原因。
+  // duration=-1：2.5 编辑使用上述目标时长范围；多个视频未指定目标时覆盖所有候选。其他任务按模型允许的 4～30 秒或 4～15 秒范围计算两端费用。
+  // 含视频输入但缺少已核实最低门槛时，只返回 lower_bound，上界未知；不能当作完整报价，更不能编造门槛。
+  // 输出尺寸规则：https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh
+  // 最低计费门槛来源：https://docs.volcengine.com/docs/ark/model-pricing?lang=zh
+}
+```
 
-## Portrait provenance
+## 运行步骤
 
-The official guide offers trusted model originals, virtual portraits, or certified/authorized human assets. Do not assume direct arbitrary human-face upload works. Trusted originals must come from the same Ark account/platform within 30 days: specified Seedance original face-containing videos/tail frames or Seedream 5.0 Lite/Pro/Flash **text-to-image** face images. Editing/compression/forwarding may invalidate trust. The 30-day trust window is separate from the 24-hour download URL retention. A provenance record alone does not create authorization or guarantee provider acceptance. Licensed-IP input can add charges outside ordinary generation pricing; obtain a real quote before approval.
+### 文生图（`operation=text-to-image`）
 
-## Official sources
+#### 运行要求
 
-- [Seedance 2.5 tutorial](https://docs.volcengine.com/docs/ark/seedance-2-5?lang=zh)
-- [Seedance 2.5 prompting](https://docs.volcengine.com/docs/ark/seedance-2-5-prompt-guide?lang=zh)
-- [Seedance 2.0 series tutorial](https://docs.volcengine.com/docs/ark/seedance-2-0?lang=zh)
-- [Seedance 2.0 prompting](https://docs.volcengine.com/docs/ark/seedance-2-0-prompt-guide?lang=zh)
-- [Video generation tutorial and pixel mappings](https://docs.volcengine.com/docs/ark/video-generation-tutorial?lang=zh)
-- [Create video task API](https://docs.volcengine.com/docs/ark/create-video-generation-task-api?lang=zh)
-- [Query video task API](https://docs.volcengine.com/docs/ark/get-video-generation-task-api?lang=zh)
-- [Portrait assets](https://docs.volcengine.com/docs/ark/seedance-portrait-asset-guide?lang=zh)
-- [Seedream Pro/Flash tutorial](https://docs.volcengine.com/docs/ark/seedream-5-0-pro?lang=zh)
-- [Interactive image editing](https://docs.volcengine.com/docs/ark/seedream-5-0-pro-editing-guide?lang=zh)
-- [General image generation and model exceptions](https://docs.volcengine.com/docs/ark/seedream-4-0-5-0?lang=zh)
-- [Image API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=zh)
-- [Model list](https://docs.volcengine.com/docs/ark/model-list?lang=zh)
+- 参数要求
+
+| 参数 | 必须性 | 可选项 / 默认值 |
+|---|---|---|
+| `prompt` | 必需 | |
+| `size` | 必需 | 参考模型列表中模型的尺寸档位约束，默认最小尺寸 |
+
+- 提示词优化
+
+使用 `sd25-pe` 优化提示词；用于图片任务时，仅应用与当前图片能力相关的规则，最终提示词须符合所选模型的要求。用户明确要求不优化时，保留原始提示词。
+
+#### 运行步骤
+
+以下步骤在用户需要问生图且确认当前 Volcengine 方案后执行。
+
+1. **构建任务 JSON：** 参考如下示例，基于用户输入的参数和确认的供应商、模型和能力，生成任务 JSON 数据。移除行尾注释后，将严格 JSON 直接追加到下一步命令的标准输入中。
+
+   ```jsonc
+   {
+     "provider": "volcengine", // 必需：供应商，供脚本选择对应适配器
+     "operation": "text-to-image", // 必需：能力，供脚本选择接口及结果处理方式
+     "original_prompt": "生成一张正方形熊猫图片", // 流程记录：用户原始提示词，不提交给供应商
+     "payload": { // 必需：火山引擎原生请求体，脚本校验后直接提交
+       "model": "doubao-seedream-5-0-flash-260915", // 必需：准确模型 ID；使用 Pro 时替换为对应 ID
+       "prompt": "一只熊猫坐在草坡上，柔和自然光，写实摄影，不添加文字。构图比例偏好：1:1。", // 必需：最终确认的提示词，脚本不再改写
+       "size": "1K", // 可选：1K、1.5K、2K，或符合像素及比例限制的 WxH；本 skill 默认最小尺寸
+       "output_format": "png", // 可选：png、jpeg；本 skill 默认 png
+       "response_format": "url", // 可选：url、b64_json；默认 url
+       "watermark": false, // 可选：是否添加平台水印；本 skill 默认 false
+       "background": "opaque", // 可选：文生图使用 opaque，不启用 transparent
+       "optimize_prompt_options": { // 可选：供应商服务端提示词优化，与本地 sd25-pe 优化独立
+         "mode": "standard" // 对象存在时填写：Pro 支持 standard、fast；Flash 仅支持 standard
+       },
+       "layer_decomposition": false // 可选：文生图保持 false；true 应走图层拆分能力
+     }
+   }
+   ```
+2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 scripts/media.py submit` 提交生成任务。该命令将返回路径记为 `$SUBMISSION`，供后续使用。
+3. **判断生成结果：** 调用 `python3 scripts/media.py status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
+4. **下载或保存图片：** 调用 `python3 scripts/media.py download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
+
+# 参考
+
+## 各模型限制
+
+当前文生图使用 Seedream 5.0 Pro 或 Flash，按以下要求选择输出规格；具体参数校验和接口处理由脚本负责。
+
+| 项目 | 使用要求 |
+|---|---|
+| 尺寸档位 | 支持 1K、1.5K、2K，默认选择最小档位；用户明确指定时按其要求。 |
+| 准确像素 | 支持指定宽高；总像素须为 921600～4624220，宽高比为 1/16～16。 |
+| 构图比例 | 在提示词中描述；需要准确宽高时使用具体像素尺寸。 |
+| 输出数量 | 每次任务生成一张图片，不提供原生组图生成。 |
+| 输出格式 | 支持 PNG、JPEG，默认 PNG。 |
+
+## 人像来源
+
+本节约束 Seedance 2.5、2.0 系列接收的含真人人脸图片／视频，不是所有 Seedream 图片任务的统一前置限制。这些模型不支持任意含真人人脸的参考图／视频直接上传。官方提供可信模型原始产物、预置虚拟人像、已授权真人素材三类路径；普通上传或仅声明“已有授权”，不代表已完成供应商要求的开通、认证或素材接入。
+
+| 所选路径 | 确认前检查 |
+|---|---|
+| 可信模型原始产物 | 同一火山方舟平台、同一实际调用账户、生成后 30 天内且保持原始字节。限指南列出的 Seedance 2.5／2.0 系列含人脸视频及对应尾帧，或 Seedream 5.0 Lite／Pro／Flash **文生图**人脸图片；图生图及拆分图层不自动在此范围内。 |
+| 预置虚拟人像 | 使用供应商提供且当前账户可用的素材及 ID，遵循该素材支持的输入角色；不要把任意 AI 图片称为预置虚拟人像。 |
+| 已授权真人素材 | 按官方指南检查当前账户开通条件、授权／认证材料与可用素材接入方式；本技能不负责代办认证、上传或创建素材 ID。 |
+
+在各能力的“人像检查”节点完成上述核验后，再报价和展示确认单；提交前再次确认文件、账户与有效期没有变化。可信原始产物的来源记录应能关联实际模型、生成操作、生成时间、账户、原始响应／任务 ID 和原文件哈希。`provenance` 只记录事实，当前脚本不自动认证人像、校验 30 天信任或验证授权，不得仅凭字段存在判定通过。
+
+不要编辑、压缩或转发后继续沿用原产物的可信结论。30 天信任窗口与结果 URL 的 24 小时保留期不同：下载、原字节转存或更换 URL 不会重新开始 30 天；TOS 转存也不改变素材来源。本技能不会自动转存。对于不含人脸的素材，不套用此人脸信任限制。
+
+人脸输入受信不保证输出通过平台审核。若返回人脸／肖像相关审核错误，保留提交记录和错误码，回到对应能力的人像检查节点修正；不直接重发付费请求。官方入口及完整细则见文末“人像素材”。
+
+## 官方来源
+
+- [Seedream Pro/Flash 教程](https://docs.volcengine.com/docs/ark/seedream-5-0-pro?lang=zh) — 模型能力与使用说明。
+- [图片 API](https://docs.volcengine.com/docs/ark/image-generation-api?lang=zh) — 维护脚本时核对参数及响应。
+- [模型列表](https://docs.volcengine.com/docs/ark/model-list?lang=zh) — 模型 ID 与规格。
+- [模型价格](https://docs.volcengine.com/docs/ark/model-pricing?lang=zh) — 计费规则与官方单价。
+- [人像素材](https://docs.volcengine.com/docs/ark/seedance-portrait-asset-guide?lang=zh) — 人像来源与后续视频复用规则。

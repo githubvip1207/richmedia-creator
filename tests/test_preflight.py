@@ -123,7 +123,7 @@ class PreflightTests(unittest.TestCase):
             self.assertEqual(result['state'], 'succeeded')
 
     def test_expiry_flows_through_saved_cost(self):
-        from core.costing import calculate
+        from cost_fixture import calculate
         spec={'provider':'byteplus','model':'seedream-5.0-flash','operation':'text-to-image','prompt':'cat','parameters':{'ratio':'9:16'},
               'fx':{'usd_cny':7,'expires_at':'2099-01-01T00:00:00Z'}}
         quote=calculate(spec)

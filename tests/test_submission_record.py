@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from core import jobs
-from core.costing import calculate
+from cost_fixture import calculate
 from providers import volcengine
 from config_fixture import config_fixture
 from test_media import video
