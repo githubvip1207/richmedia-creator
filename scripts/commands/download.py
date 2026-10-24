@@ -44,13 +44,44 @@ def valid_media(path, kind, expected_size=None):
         return False
 
 
+def download_with_curl(executable, url, destination):
+    """Fetch media with bounded connection/stall waits, never a generation POST."""
+    require(url.startswith('https://') and not any(ord(c) < 32 for c in url),
+            'Output URL must be HTTPS without control characters')
+    # Keep signed URLs out of process arguments and suppress ~/.curlrc settings.
+    escaped = url.replace('\\', '\\\\').replace('"', '\\"')
+    try:
+        result = subprocess.run(
+            [executable, '-q', '--config', '-', '--location', '--fail', '--silent',
+             '--show-error', '--proto', '=https', '--proto-redir', '=https',
+             '--connect-timeout', '15', '--speed-limit', '1024', '--speed-time', '20',
+             '--max-time', '900', '--user-agent', 'richmedia-creator/1.0',
+             '--output', str(destination), '--write-out', '%{http_code}'],
+            input='url = "' + escaped + '"\n', capture_output=True, text=True, timeout=915)
+    except subprocess.TimeoutExpired:
+        raise TimeoutError('Media transfer exceeded total timeout') from None
+    if result.returncode:
+        status = result.stdout.strip()
+        if status.isdigit() and int(status) >= 400:
+            raise urllib.error.HTTPError(url, int(status), 'Media HTTP error', {}, None)
+        # curl stderr may contain a signed URL; expose only the numeric exit code.
+        raise OSError('Media transport curl exit %s' % result.returncode)
+
+
 def download_url(url, destination):
     """Retry only media GETs; each attempt replaces any incomplete file."""
     for attempt in range(3):
         try:
-            # 媒体 URL 已包含下载授权，不附加 API Key；120 秒是每次阻塞读取的超时，不是整个下载总时长。
+            curl = shutil.which('curl')
+            if curl:
+                download_with_curl(curl, url, destination)
+                return
+            # Without curl, retain urllib compatibility with a bounded read wait.
+            # 媒体 URL 已包含下载授权，不附加 API Key；30 秒是每次阻塞读取的超时，不是整个下载总时长。
             # No API credentials on media downloads. Timeout is per blocking read.
-            with urllib.request.urlopen(url, timeout=120) as response, open(destination, 'wb') as f:
+            # Identify this client explicitly; do not attach supplier API credentials.
+            request = urllib.request.Request(url, headers={'User-Agent': 'richmedia-creator/1.0'})
+            with urllib.request.urlopen(request, timeout=30) as response, open(destination, 'wb') as f:
                 require(response.geturl().startswith('https://'), 'Refuse HTTPS downgrade')
                 received = 0
                 while True:
@@ -71,6 +102,7 @@ def download_url(url, destination):
                 error.close()
             if not retryable or attempt == 2:
                 detail = ('HTTP %s' % error.code if isinstance(error, urllib.error.HTTPError)
+                          else str(error) if str(error).startswith('Media transport curl exit ')
                           else type(error).__name__)
                 raise RuntimeError('Media download failed after %s attempt(s): %s; '
                                    'generation is preserved, retry download only' % (attempt + 1, detail)) from None

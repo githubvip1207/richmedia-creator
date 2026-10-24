@@ -28,7 +28,15 @@ class Response(io.BytesIO):
 
 # 覆盖媒体下载的重试范围、停止条件、隐私摘要和清单复用行为。
 class DownloadRetry(unittest.TestCase):
-    # 模拟首次读取一部分后超时、第二次成功；断言临时文件被完整替换、超时值为 120 秒且只等待 2 秒。
+    def setUp(self):
+        # Existing cases exercise the portable urllib path; curl cases opt in.
+        original = download_command.shutil.which
+        mock = patch.object(download_command.shutil, 'which',
+                            side_effect=lambda name: None if name == 'curl' else original(name))
+        mock.start()
+        self.addCleanup(mock.stop)
+
+    # 模拟首次读取一部分后超时、第二次成功；断言临时文件被完整替换、超时值为 30 秒且只等待 2 秒。
     def test_timeout_then_success_replaces_partial_file(self):
         # 首次返回少量字节，随后抛出超时，用于模拟中途断流。
         class Broken(Response):
@@ -43,8 +51,33 @@ class DownloadRetry(unittest.TestCase):
                 download_command.download_url('https://example.com/result.png', target)
                 self.assertEqual(target.read_bytes(), b'complete')
                 self.assertEqual(get.call_count, 2)
-                self.assertEqual(get.call_args.kwargs['timeout'], 120)
+                self.assertEqual(get.call_args.kwargs['timeout'], 30)
                 sleep.assert_called_once_with(2)
+
+    def test_cdn_stalling_default_python_agent_downloads_in_one_attempt(self):
+        # Reproduce the observed CDN behavior: default urllib requests receive
+        # only a partial body, while an explicitly identified client completes.
+        class Stalled(Response):
+            def read(self, size):
+                if self.tell():
+                    raise TimeoutError('CDN stopped sending the body')
+                return super().read(3)
+
+        def cdn(request, **kwargs):
+            headers = dict(request.header_items()) if isinstance(request, urllib.request.Request) else {}
+            agent = headers.get('User-agent', 'Python-urllib/3.14')
+            self.assertFalse(any(k.lower() in ('authorization', 'x-api-key') for k in headers))
+            if agent.startswith('Python-urllib/'):
+                return Stalled(b'partial')
+            return Response(b'complete media')
+
+        with tempfile.TemporaryDirectory() as d:
+            target = Path(d) / 'image.part'
+            with patch.object(download_command.urllib.request, 'urlopen', side_effect=cdn) as get, patch.object(download_command.time, 'sleep') as sleep:
+                download_command.download_url('https://example.com/result.png', target)
+                self.assertEqual(target.read_bytes(), b'complete media')
+                self.assertEqual(get.call_count, 1)
+                sleep.assert_not_called()
 
     # 连续抛出传输错误，验证最多三次 GET、2/4 秒退避，并确保异常摘要不泄露签名 URL。
     def test_exhaustion_stops_after_three_attempts_and_hides_url(self):

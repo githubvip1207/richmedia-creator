@@ -190,6 +190,6 @@ python3 "$SKILL/scripts/main.py" download --submission "$SUBMISSION"
 
 只有生成成功、`execution.download_complete=true`、实际文件与 `result.files` 清单一致，并通过已确认要求的内容核验，才算任务完成。`status` 返回 `success=true` 仅表示生成成功，不表示下载或交付完成。
 
-媒体 GET 下载最多尝试三次，间隔 2/4 秒；付费生成 POST 不自动重试。下载没有 Range 断点续传。结果 URL 失效时先检查已保存文件或供应商恢复方式，不自动付费补生成。
+媒体下载必须使用 `download` 命令，不得另写下载代码或绕过该命令。
 
 临时目录可能被系统清理，文件缺失不代表允许再次付费。原始响应及清单可能含临时签名 URL，不将其或 Base64 正文粘贴到聊天中。
