@@ -12,14 +12,14 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 
 | 命令 | 输入 | 输出与用途 | 执行环境 |
 |---|---|---|---|
-| `init` | 标准输入中的需求 JSON 对象 | 创建临时任务文件目录、构造 `request.json` 文件，返回 `workdir` | 沙箱内可运行 |
-| `models [--provider volcengine或byteplus]` | 可选供应商标识 | 返回本地模型目录；不验证账户是否有调用权限 | 沙箱内可运行 |
-| `check` | 无 | 只读检查项目配置、供应商密钥是否已配置、汇率和依赖 | 沙箱内可运行 |
-| `doctor [--dependencies或--exchange-rate]` | 可选修复范围 | 修复依赖或汇率后重新检查 | 必须沙箱外（含所有修复选项） |
-| `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，返回 `workdir`、`quote` 及完整成本结果 | 沙箱内可运行（当前基础文生图） |
+| `init` | 标准输入中的需求 JSON 对象 | 创建临时任务文件目录、构造 `request.json` 文件，返回 `workdir` | 无限制 |
+| `models [--provider volcengine或byteplus]` | 可选供应商标识 | 返回本地模型目录；不验证账户是否有调用权限 | 无限制 |
+| `check` | 无 | 只读检查项目配置、供应商密钥是否已配置、汇率和依赖 | 无限制 |
+| `doctor [--dependencies或--exchange-rate]` | 可选修复范围 | 修复依赖或汇率后重新检查 | 必须沙箱外 |
+| `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，返回 `workdir`、`quote` 及完整成本结果 | 无限制 |
 | `submit --workdir "$WORK" --approval-text '用户实际确认原文'` | 标准输入中的任务 JSON；也可用 `--request` 指定文件 | 提交一次生成请求，返回 `submission` 路径 | 必须沙箱外 |
-| `status --submission "$SUBMISSION"` | 已有提交文件路径 | 文生图仅返回本地执行状态，不向供应商查询，也不恢复未知结果 | 文生图可在沙箱内；历史视频记录查询必须沙箱外 |
-| `download --submission "$SUBMISSION"` | 已有提交文件路径 | 下载图片，更新提交文件内的结果清单 | 必须沙箱外（包括复用本地结果） |
+| `status --submission "$SUBMISSION"` | 已有提交文件路径 | 文生图仅返回本地执行状态，不向供应商查询，也不恢复未知结果 | 必须沙箱外 |
+| `download --submission "$SUBMISSION"` | 已有提交文件路径 | 下载图片，更新提交文件内的结果清单 | 必须沙箱外 |
 
 表中“必须沙箱外”的命令从首次执行起即使用沙箱外环境，不先在受限沙箱中尝试。通过 `exec_command` 执行时，设置 `sandbox_permissions: "require_escalated"`，并在 `justification` 中说明联网用途。
 
