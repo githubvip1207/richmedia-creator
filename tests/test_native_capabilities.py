@@ -1,4 +1,4 @@
-"""Both public suppliers expose only basic text-to-image."""
+"""Capability boundaries stay supplier-specific."""
 import copy
 import io
 import json
@@ -20,7 +20,8 @@ from test_native_byteplus import request
 class NativeCapabilities(unittest.TestCase):
     def test_both_suppliers_reject_other_capabilities_before_post_or_media_access(self):
         for provider in ('volcengine', 'byteplus'):
-            for operation in set(OPERATIONS) - {'text-to-image'}:
+            supported = {'text-to-image', 'image-to-image'}
+            for operation in set(OPERATIONS) - supported:
                 with self.subTest(provider=provider, operation=operation), tempfile.TemporaryDirectory() as tmp:
                     spec = {'provider': provider, 'operation': operation, 'payload': {}}
                     with self.assertRaisesRegex(ValueError, 'Only basic text-to-image'):

@@ -18,7 +18,7 @@
 | 能力 | 支持模式 | 支持模型（价格从高到低） | 脚本实现 | 详细说明 |
 |---|---|---|---|---|
 | 文生图 | — | Seedream 5.0 Pro > Seedream 5.0 Flash | 已实现 | [文生图](#文生图operationtext-to-image) |
-| 图生图 | 单图编辑、多图融合、局部编辑 | Seedream 5.0 Pro > Seedream 5.0 Flash | 未实现 | — |
+| 图生图 | 单图编辑、多图融合、局部编辑 | Seedream 5.0 Pro > Seedream 5.0 Flash | 已实现 | [图生图](#图生图operationimage-to-image) |
 | 图层拆分 | — | Seedream 5.0 Pro > Seedream 5.0 Flash | 未实现 | — |
 | 文生视频 | — | Seedance 2.5 > Seedance 2.0 > Seedance 2.0 Fast > Seedance 2.0 Mini | 未实现 | — |
 | 图生视频 | 首帧、首尾帧 | Seedance 2.5 > Seedance 2.0 > Seedance 2.0 Fast > Seedance 2.0 Mini | 未实现 | — |
@@ -197,21 +197,76 @@ BytePlus 使用独立美元价目表；有有效汇率时仅采用脚本返回�
 4. **下载或保存图片：** 调用 `python3 "$SKILL/scripts/main.py" download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
 
 
-## 图片输出规格
+### 图生图（`operation=image-to-image`）
 
-当前文生图使用 Seedream 5.0 Pro 或 Flash，按以下要求选择输出规格；具体参数校验和接口处理由脚本负责。
+#### 生成要求
 
-| 项目 | 使用要求 |
-|---|---|
-| 尺寸档位 | 支持 1K、1.5K、2K；用户未指定时默认最小档位，以降低测试成本；已指定时按用户要求。 |
-| 准确像素 | 支持指定宽高；总像素须为 921600～4624220，宽高比为 1/16～16。 |
-| 构图比例 | 仅在提示词中表达的比例属于构图偏好，不保证精确比例；未进行提示词优化时，不额外向提示词追加比例表达。用户明确要求严格比例或准确像素时，使用符合上述像素及宽高比限制的具体 `WxH`，并按该尺寸估价，在确认单中列明准确宽高；只指定严格比例时，结合已确定的尺寸档位选择符合比例的宽高。无法同时满足比例、像素或尺寸档位要求时，先澄清，不降级为比例偏好。 |
-| 输出数量 | 每次任务生成一张图片，不提供原生组图生成；用户要求多张时告知当前任务不支持，不自动拆成多次提交。 |
-| 输出格式 | 模型支持 PNG、JPEG；本技能文生图固定输出 PNG，不提供格式选择。 |
+- 参数要求
+
+| 参数 | 必须性 | 可选项 / 默认值 |
+|---|---|---|
+| `prompt` | 必需 | |
+| `size` | 必需 | 参考模型列表中的尺寸约束；用户未指定时默认最小尺寸；已指定时按用户要求 |
+| `assets` | 必需 | 单图编辑 1 张；多图融合 2～10 张；局部编辑 1～10 张。按确认顺序提供本地绝对路径或 HTTPS URL，可混用。 |
+
+- 素材要求
+
+支持 JPEG、PNG、WebP、BMP、TIFF、GIF、HEIC、HEIF。每张图片不超过 30 MiB，宽高均大于 14 px，总像素不超过 3600 万，宽高比为 1/16～16。素材来源须为本地绝对路径或可访问的 HTTPS URL，按下方示例填写外层 `assets`。
+
+- 提示词优化
+
+在主流程第 2 步落实本节生成要求时确定最终提示词，供估价和确认单使用；以下生成步骤只使用已确认的最终提示词，不再改写。
+本能力要求使用 `sd25-pe` 优化提示词，仅应用与当前图片能力相关的规则，最终提示词须符合所选模型的要求。用户明确要求不优化时，按主流程将完整拼接的 `original_prompt` 原样赋给 `optimized_prompt`，不调用本地提示词优化，也不主动启用供应商服务端提示词优化。如所选模型无法关闭服务端优化，先说明限制并取得用户接受，再提交。
+
+图生图提示词须结合实际参考图，明确修改项、保留项及各图片用途；多图按输入顺序称“图片1”“图片2”。
+
+- 局部编辑
+
+局部编辑可用自然语言指明区域，或使用用户已标注的参考图。使用 `<point>x y</point>`、`<bbox>x1 y1 x2 y2</bbox>` 时，坐标须为 0～999 的归一化整数，框从左上到右下且面积非零；先核对实际区域，不编造坐标。此能力不提供独立 mask 参数，也不保证区域外像素完全不变；交付前仍需核验。
+
+#### 生成步骤
+
+以下步骤在用户需要图生图且确认当前 BytePlus 方案后执行。
+
+1. **构建任务 JSON：** 参考如下示例，基于用户输入的参数和确认的供应商、模型和能力，生成任务 JSON 数据。移除行尾注释后，将严格 JSON 直接追加到下一步命令的标准输入中。以下示例为单图编辑；多图融合时按顺序扩展外层 `assets` 数组，在最终提示词中说明每张参考图的用途。局部编辑使用同一结构，将已核实的区域和保留要求写入提示词。
+
+   ```jsonc
+   {
+     "provider": "byteplus", // 必需：供应商，供脚本选择对应适配器
+     "operation": "image-to-image", // 必需：能力，供脚本选择接口及结果处理方式
+     "original_prompt": "把图片背景改为草地，保留熊猫外观", // 流程记录：用户原始提示词，不提交给供应商
+     "assets": [ // 必需：本方案使用的素材，按输入顺序排列，由脚本解析，不直接提交给供应商
+       {
+         "id": "panda", // 必需：任务内唯一标识，供供应商引用；不是供应商素材 ID
+         "kind": "image", // 必需：image、video 或 audio；本能力仅接受 image
+         "source": "https://example.com/panda.jpg", // 必需：执行前替换为实际 HTTPS URL 或本地绝对路径
+         "purpose": "待编辑的熊猫图片，保留熊猫外观，只修改背景" // 必需：素材用途，只在这里记录一次
+       }
+     ],
+     "payload": { // 必需：BytePlus 请求参数，脚本校验模型、参数及需求记录，解析外层 assets 并填充素材字段后提交，不改写提示词；调用约定见脚本操作手册“提交生成”
+       "model": "dola-seedream-5-0-flash-260915", // 必需：准确模型 ID；使用 Pro 时替换为对应 ID
+       "prompt": "将图片1的背景替换为草地，保留熊猫外观和姿态。", // 必需：读取当前 request.json 的 optimized_prompt，须与确认单一致，不再改写
+       "image": [], // 由 Python 根据外层 assets 按顺序填充；此处留空数组或省略，不手工填写素材
+       "size": "1K", // 本 skill 必需：1K、1.5K、2K，或符合像素及比例限制的 WxH；用户未指定时默认最小尺寸
+       "output_format": "png", // 固定：PNG
+       "response_format": "url", // 固定：返回 URL
+       "watermark": false, // 固定：不加平台水印
+       "background": "opaque", // 固定：不启用透明背景
+       "layer_decomposition": false // 固定：图生图不启用图层拆分；optimize_prompt_options 固定省略
+     }
+   }
+   ```
+
+2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 "$SKILL/scripts/main.py" submit` 提交生成任务。使用本次任务文件目录 `$WORK` 作为 `--workdir`。脚本校验通过后将已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。任务文件目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
+3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/main.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
+4. **下载或保存图片：** 调用 `python3 "$SKILL/scripts/main.py" download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
+
+图生图核验时，检查修改区域、产品、身份、文字及保留内容；多图融合还须检查各参考图的用途、主体关系和顺序是否符合确认要求。
 
 ## 官方来源
 
 - [Seedream Pro/Flash 教程](https://docs.byteplus.com/en/docs/modelark/seedream-5-0-pro) — 模型能力与使用说明。
+- [交互式图片编辑](https://docs.byteplus.com/en/docs/modelark/seedream-5-0-pro-editing-guide) — 局部编辑与区域表达。
 - [图片 API](https://docs.byteplus.com/en/docs/modelark/image-generation-api) — 维护脚本时核对参数及响应。
 - [模型列表](https://docs.byteplus.com/en/docs/modelark/model-list) — 模型 ID 与规格。
 - [模型价格](https://docs.byteplus.com/en/docs/modelark/model-pricing) — 计费规则与官方单价。

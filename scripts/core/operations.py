@@ -28,5 +28,6 @@ def internal_operation(spec):
 
 def require_supported_operation(spec):
     """Public execution and estimation share the same capability boundary."""
-    if spec.get('operation') != 'text-to-image':
-        raise ValueError('Only basic text-to-image is currently implemented for Volcengine and BytePlus')
+    if (spec.get('operation') != 'text-to-image'
+            and not (spec.get('provider') in ('volcengine', 'byteplus') and spec.get('operation') == 'image-to-image')):
+        raise ValueError('Only basic text-to-image and image-to-image are implemented for Volcengine and BytePlus')

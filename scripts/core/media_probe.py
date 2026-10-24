@@ -2,6 +2,8 @@
 import copy
 import json
 import math
+import mimetypes
+from .assets import sha256_file
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,6 +28,7 @@ def probe_asset(asset):
         path = Path(source)
         require(path.is_absolute() and path.is_file(),
                 'Use an existing absolute media path or HTTPS URL; asset IDs need an accessible original source')
+    local_hash = sha256_file(source) if not source.startswith('https://') else None
     probe = shutil.which('ffprobe')
     require(probe is not None, 'ffprobe is required to inspect cost assets; run main.py doctor --dependencies')
     try:
@@ -55,6 +58,10 @@ def probe_asset(asset):
             metadata['duration'] = duration
     except (ValueError, TypeError, KeyError, StopIteration, AttributeError):
         raise ValueError('Cost asset has no valid dimensions/duration for its declared kind') from None
+    if local_hash is not None:
+        require(sha256_file(source) == local_hash, 'Local asset changed during inspection; estimate again')
+        metadata.update(sha256=local_hash, bytes=Path(source).stat().st_size,
+                        mime=mimetypes.guess_type(source)[0])
     return {**({'id': asset['id']} if 'id' in asset else {}),
             'kind': kind, 'source': source, 'metadata': metadata}
 
@@ -71,7 +78,13 @@ def calculate_asset_inputs(inputs, fx=None):
     get_provider(inputs['provider'])
     assets = inputs.get('assets', [])
     require(isinstance(assets, list), 'assets must be an array')
+    if inputs['operation'] == 'image-to-image':
+        require(1 <= len(assets) <= 10 and all(isinstance(a, dict) and a.get('kind') == 'image' for a in assets),
+                'image-to-image requires 1..10 image assets')
     measured = [probe_asset(a) for a in assets]
+    if inputs['operation'] == 'image-to-image':
+        for asset in measured:
+            validate_image_metadata(asset['metadata'])
     resolved = {k: v for k, v in inputs.items() if k not in ('assets', 'estimate_context')}
     resolved['input_images'] = sum(a['kind'] == 'image' for a in measured)
     resolved['input_video_seconds'] = [a['metadata']['duration'] for a in measured if a['kind'] == 'video']
@@ -79,3 +92,19 @@ def calculate_asset_inputs(inputs, fx=None):
     quote = calculate_inputs(resolved, context=inputs.get('estimate_context'), fx=fx, measured_assets=measured)
     quote['input'] = copy.deepcopy(inputs)
     return quote
+
+
+def validate_image_metadata(metadata, require_dimensions=True):
+    """Seedream reference image limits; remote byte size may remain unverified."""
+    width, height = metadata.get('width'), metadata.get('height')
+    if width is not None or height is not None or require_dimensions:
+        require(type(width) is int and type(height) is int and min(width, height) > 14
+                and width * height <= 36000000 and 1/16 <= width/height <= 16,
+                'Image dimensions outside supported reference limits')
+    if 'bytes' in metadata:
+        require(type(metadata['bytes']) is int and 0 <= metadata['bytes'] <= 30*1024*1024,
+                'Image exceeds 30 MB limit')
+    if metadata.get('mime') is not None:
+        require(metadata['mime'] in ('image/jpeg', 'image/png', 'image/webp', 'image/bmp',
+                                    'image/x-ms-bmp', 'image/tiff', 'image/gif', 'image/heic', 'image/heif'),
+                'Unsupported input image format')

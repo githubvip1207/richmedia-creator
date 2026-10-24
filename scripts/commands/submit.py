@@ -48,9 +48,30 @@ def validate_requirement(directory, spec, compiled):
             continue
         require(compiled['parameters'].get(key) == value,
                 'Submission parameter ' + key + ' differs from request.json; update the plan and reconfirm')
-    if compiled['kind'] == 'image' and spec['operation'] == 'text-to-image':
-        require('size' in parameters, 'Text-to-image size missing from request.json supplier parameters')
-        require(selected.get('assets') == [], 'Text-to-image supplier assets must be empty')
+    if compiled['kind'] == 'image':
+        require('size' in parameters, 'Image size missing from request.json supplier parameters')
+        if spec['operation'] == 'text-to-image':
+            require(selected.get('assets') == [], 'Text-to-image supplier assets must be empty')
+        else:
+            catalog = record.get('assets')
+            refs = selected.get('assets')
+            require(isinstance(catalog, list) and all(isinstance(a, dict) for a in catalog),
+                    'Image asset catalog missing from request.json')
+            ids = [a.get('id') for a in catalog]
+            require(all(isinstance(i, str) and i.strip() for i in ids) and len(set(ids)) == len(ids),
+                    'Image asset ids must be unique nonempty strings')
+            require(isinstance(refs, list) and all(isinstance(a, dict) and set(a) == {'id'} for a in refs),
+                    'Supplier assets must contain ordered id references')
+            by_id = {a['id']: a for a in catalog}
+            require(all(a['id'] in by_id for a in refs), 'Unknown supplier asset reference')
+            expected = [by_id[a['id']] for a in refs]
+            actual = compiled['assets']
+            require(len(expected) == len(actual) and all(
+                e.get('kind') == a['kind'] and e.get('source') == a['source']
+                and e.get('id') == a.get('id') and e.get('purpose') == a.get('purpose')
+                for e, a in zip(expected, actual)),
+                'Submission assets/order differ from request.json or cost artifact; update and reconfirm')
+
 
 
 def submit(jobdir, spec, approval_text, accept_uncertain=False):

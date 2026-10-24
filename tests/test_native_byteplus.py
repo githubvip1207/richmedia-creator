@@ -102,4 +102,4 @@ class NativeBytePlus(unittest.TestCase):
             spec=request();spec['payload'].update(fields)
             with self.subTest(fields=fields),self.assertRaises(ValueError):compile_request(spec)
         spec=request();spec['operation']='image-to-image'
-        with self.assertRaisesRegex(ValueError,'Volcengine'):compile_request(spec)
+        with self.assertRaisesRegex(ValueError,'outer assets'):compile_request(spec)

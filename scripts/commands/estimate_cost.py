@@ -18,7 +18,8 @@ def run(args):
     inputs = json.loads(sys.stdin.read(), parse_constant=reject_constant)
     require(isinstance(inputs, dict), 'Cost input must be a JSON object')
     require_supported_operation(inputs)
-    require(not inputs.get('assets'), 'Text-to-image must not include input assets')
+    if inputs['operation'] == 'text-to-image':
+        require(not inputs.get('assets'), 'Text-to-image must not include input assets')
     quote = calculate_asset_inputs(inputs, fx=fx_from_env())
     target = workdir/(inputs['provider'] + '-priceing.json')
     with lock(workdir):

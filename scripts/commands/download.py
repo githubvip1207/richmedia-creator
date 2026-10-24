@@ -148,7 +148,7 @@ def download(submission):
             if kind == 'image' and entry.get('z_index',0) > 0:
                 fmt = 'png'
             require(fmt in ('png','jpeg','mp4','mov'), 'Unexpected output format')
-            if plan['compiled'].get('operation') == 'text-to-image':
+            if plan['compiled'].get('operation') in ('text-to-image', 'image-to-image'):
                 require(fmt == plan['compiled']['parameters']['output_format'],
                         'Provider image format differs from confirmed format')
             name = ('%02d-' % i) + entry.get('label','image') + '.' + fmt

@@ -18,8 +18,8 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 | `doctor [--dependencies或--exchange-rate]` | 可选修复范围 | 修复依赖或汇率后重新检查 | 必须沙箱外 |
 | `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，返回 `workdir`、`quote` 及完整成本结果 | 无限制 |
 | `submit --workdir "$WORK" --approval-text '用户实际确认原文'` | 标准输入中的任务 JSON；也可用 `--request` 指定文件 | 提交一次生成请求，返回 `submission` 路径 | 必须沙箱外 |
-| `status --submission "$SUBMISSION"` | 已有提交文件路径 | 文生图仅返回本地执行状态，不向供应商查询，也不恢复未知结果 | 必须沙箱外 |
-| `download --submission "$SUBMISSION"` | 已有提交文件路径 | 下载图片，更新提交文件内的结果清单 | 必须沙箱外 |
+| `status --submission "$SUBMISSION"` | 已有提交文件路径 | 检查已有任务的执行状态，返回是否成功及错误原因 | 必须沙箱外 |
+| `download --submission "$SUBMISSION"` | 已有提交文件路径 | 下载且保存已有任务的生成结果 | 必须沙箱外 |
 
 表中“必须沙箱外”的命令从首次执行起即使用沙箱外环境，不先在受限沙箱中尝试。通过 `exec_command` 执行时，设置 `sandbox_permissions: "require_escalated"`，并在 `justification` 中说明联网用途。
 
@@ -102,7 +102,7 @@ JSON
 
 ## 提交生成
 
-任务 JSON 使用 `provider`、`operation`、`original_prompt` 和 `payload`。`payload` 按供应商 API 所需的字段和格式组织。当前文生图要求显式提供 `size` 及能力指南规定的固定参数；脚本验证后原样提交，不追加提示词或套用供应商默认输出规格。
+任务 JSON 使用 `provider`、`operation`、`original_prompt` 和 `payload`；需要素材时在外层 `assets` 中记录。`payload` 按供应商 API 所需的字段和格式组织。脚本校验参数并按能力要求解析素材后提交，不追加提示词或套用供应商默认输出规格。
 
 以下为结构示例，实际输入字段以对应供应商能力章节为准：
 
@@ -119,7 +119,7 @@ JSON
 }
 ```
 
-选择并确认供应商后，提交上述完整任务 JSON。脚本在校验通过后将其保存为当前 `$WORK` 下的 `payload.json`；使用 `--request` 时由调用方先保存输入文件。提交只接受含供应商原生 `payload` 的格式，不接受旧版通用任务格式。提交前脚本核对 `request.json` 的原话、最终提示词、供应商方案及参数，并检查 `sd25-pe` 和 `ffprobe` 均已安装。脚本为每次提交分别保存 `submit-NNN.json`，包含本次实际请求及结果清单，并返回 `submission` 路径。NNN 从 `001` 开始递增。
+确认供应商方案后，提交完整任务 JSON；使用 `--request` 时先将 JSON 保存为文件。脚本核对提交内容与 `request.json` 及报价的一致性，校验通过后保存为 `$WORK/payload.json`。每次提交分别保存为 `submit-NNN.json`，记录请求、响应、执行状态及后续结果清单，并返回该文件的 `submission` 路径。NNN 从 `001` 开始递增。
 
 ```bash
 # --approval-text` 必须记录真实回复。费用上界未知时，只有用户明确接受该不确定性后才能加 `--accept-uncertain-cost`。
@@ -184,7 +184,7 @@ python3 "$SKILL/scripts/main.py" download --submission "$SUBMISSION"
 | `failed` | 生成失败，无成功输出可下载；检查错误，需要再次生成时取得新的确认 |
 | `rejected` | 根据已保存错误处理；需要重新生成时取得新的确认 |
 | 供应商返回人脸、人像或肖像相关错误 | 保留提交记录及错误码，向用户说明供应商实际返回的错误；仅在错误发生后告知，不在生成前要求人像来源、授权认证或可信期限核验。本技能不代办供应商认证或素材接入；需要再次付费生成时重新估价并取得确认，不自动重试 |
-| `submitting`、`submission_unknown`，或网络中断导致结果不明 | 保留记录，先在供应商控制台核对；文生图的 `status` 只读本地记录，不能消除不确定性。不要自动重新提交或切换供应商 |
+| `submitting`、`submission_unknown`，或网络中断导致结果不明 | 保留提交记录，按对应供应商能力指南核对任务是否已受理、生成或计费；结果未明确前，不自动重新提交或切换供应商 |
 | 下载中断或失败 | 对同一个 `$SUBMISSION` 再次运行 `download`，不重新生成；已完成且哈希匹配的文件可复用 |
 | 图片内容不符合确认要求 | 说明具体差异；需要再次付费修正时重新确认 |
 

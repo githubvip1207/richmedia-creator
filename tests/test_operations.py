@@ -53,7 +53,7 @@ class SevenOperations(unittest.TestCase):
         self.assertEqual(quote['calculation']['operation'],'image-to-image')
         self.assertNotIn('mode',quote['calculation'])
         changed=copy.deepcopy(spec);changed['parameters']['size']='2K'
-        with self.assertRaisesRegex(ValueError,'Only basic text-to-image'):
+        with self.assertRaisesRegex(ValueError,'omit optimize_prompt_options'):
             consume_quote(as_native(changed),quote)
 
     def test_reference_modes_control_native_video_task_type(self):
@@ -92,6 +92,6 @@ class SevenOperations(unittest.TestCase):
         from core.request import compile_request as compile_native
         from providers import volcengine
         spec = {'provider': 'volcengine', 'operation': 'image-to-image', 'payload': {}}
-        with patch.object(volcengine, 'request') as post, self.assertRaisesRegex(ValueError, 'Only basic text-to-image'):
+        with patch.object(volcengine, 'request') as post, self.assertRaisesRegex(ValueError, 'exact image model ID'):
             compile_native(spec)
         post.assert_not_called()
