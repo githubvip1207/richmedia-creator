@@ -27,8 +27,12 @@ python3 "$SKILL/scripts/main.py" check
 |---|------|---|
 | `BYTEPLUS_API_KEY` | 使用 BytePlus 时所需的 API 密钥 | 缺失时忽略该供应商 |
 | `VOLCENGINE_API_KEY` | 使用 Volcengine 时所需的 API 密钥 | 缺失时忽略该供应商 |
-| `USD_CNY` | 美元兑人民币汇率，表示 1 美元对应的人民币金额 | 缺失时使用 `python3 "$SKILL/scripts/main.py" doctor --exchange-rate` 更新，或仅展示原币报价 |
-| `USD_CNY_EXPIRES_AT` | 汇率过期时间，格式为 ISO 8601 | 缺失或过期时，使用 `python3 "$SKILL/scripts/main.py" doctor --exchange-rate` 更新，或仅展示原币报价 |        
+| `USD_CNY` | 美元兑人民币汇率，表示 1 美元对应的人民币金额 | 缺失时必须先按下方“汇率更新规则”更新 |
+| `USD_CNY_EXPIRES_AT` | 汇率过期时间，格式为 ISO 8601 | 缺失或过期时必须先按下方“汇率更新规则”更新 |        
+
+### 汇率更新规则
+
+汇率缺失、无效或过期时，必须先执行 `python3 "$SKILL/scripts/main.py" doctor --exchange-rate`，不得未经尝试直接使用原币报价。更新成功后，使用有效汇率预估成本；只有实际尝试更新失败时，才允许仅展示原币报价，并说明失败原因；不得使用缺失、无效或过期的汇率换算。
 
 ### 依赖检查
 
