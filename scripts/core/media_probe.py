@@ -86,6 +86,14 @@ def calculate_asset_inputs(inputs, fx=None):
         maximum = 1 if inputs['operation'] == 'decompose-layers' else 10
         require(1 <= len(assets) <= maximum and all(isinstance(a, dict) and a.get('kind') == 'image' for a in assets),
                 inputs['operation'] + ' requires 1..' + str(maximum) + ' image assets')
+    if inputs['operation'] == 'text-to-video':
+        require(assets == [], 'Text-to-video must not include assets')
+    if inputs['operation'] == 'image-to-video':
+        from .operations import internal_operation
+        mode = internal_operation(inputs)
+        require(len(assets) == (1 if mode == 'first-frame' else 2)
+                and all(isinstance(a, dict) and a.get('kind') == 'image' for a in assets),
+                'Image-to-video requires ordered first/last image frames')
     measured = [probe_asset(a) for a in assets]
     if inputs['operation'] in ('image-to-image', 'decompose-layers'):
         for asset in measured:
@@ -93,6 +101,12 @@ def calculate_asset_inputs(inputs, fx=None):
                 validate_layer_metadata(asset['metadata'])
             else:
                 validate_image_metadata(asset['metadata'])
+        validate_image_request_size(measured)
+    if inputs['operation'] == 'image-to-video':
+        from .native_video import validate_frame_metadata
+        for asset in measured:
+            require(asset['kind'] == 'image', 'Image-to-video accepts image frames only')
+            validate_frame_metadata(asset['metadata'])
         validate_image_request_size(measured)
     resolved = {k: v for k, v in inputs.items() if k not in ('assets', 'estimate_context')}
     resolved['input_images'] = sum(a['kind'] == 'image' for a in measured)

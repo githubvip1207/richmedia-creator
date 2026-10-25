@@ -105,7 +105,7 @@ class SupplierBehavior(unittest.TestCase):
         a={'kind':'image','source':'asset://test-asset','purpose':'角色参考','role':'first_frame',
            'provenance':{'provider':'volcengine'}}
         with self.assertRaisesRegex(ValueError,'supplier/account scoped'):
-            compile_request(request(operation='image-to-video', mode='first-frame',assets=[a]))
+            compile_request(request(operation='image-to-video', assets=[a]))
 
 
 def selected_request(provider='byteplus'):

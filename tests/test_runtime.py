@@ -99,10 +99,10 @@ class ModelBehavior(unittest.TestCase):
     # 验证首帧模式锁定自适应比例，且不能混入普通视频参考素材。
     def test_first_frame_is_not_reference(self):
         img = asset('image','first_frame')
-        c = compile_request(video(operation='image-to-video', mode='first-frame',assets=[img]))
+        c = compile_request(video(operation='image-to-video', assets=[img]))
         self.assertEqual(c['parameters']['ratio'],'adaptive')
         with self.assertRaises(ValueError):
-            compile_request(video(operation='image-to-video', mode='first-frame',assets=[img,asset()]))
+            compile_request(video(operation='image-to-video', assets=[img,asset()]))
 
     # 2.0 纯音频参考必须失败；2.5 支持对应输入，检查模型能力差异。
     def test_20_audio_needs_visual_reference(self):
@@ -201,7 +201,7 @@ class PriceBehavior(unittest.TestCase):
 
     # 自适应比例缺少可靠输出尺寸时，金额应为未知，不能按零费用展示。
     def test_adaptive_unknown_not_zero(self):
-        c = compile_request(video(operation='image-to-video', mode='first-frame',assets=[asset('image','first_frame')]))
+        c = compile_request(video(operation='image-to-video', assets=[asset('image','first_frame')]))
         c['assets'][0]['metadata'].update(width=1300, height=1000)
         e = estimate(c)
         self.assertIsNone(e['amount_cny'])

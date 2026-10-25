@@ -39,7 +39,8 @@ class SubmissionRecord(unittest.TestCase):
         self.assertTrue(all(q['request']['method'] == 'GET' for q in record['queries']))
         def download(url, path):
             path.write_bytes(b'\x00\x00\x00\x18ftypisom' + bytes(20))
-        with patch.object(download_command, 'download_url', side_effect=download) as get:
+        with patch.object(download_command, 'download_url', side_effect=download) as get, \
+                patch.object(download_command, 'video_metadata', return_value={'width':1280,'height':720,'duration':4,'has_audio':False}):
             result = download_command._download(self.record)
             result = download_command._download(self.record)
             get.assert_called_once()

@@ -149,6 +149,9 @@ def compile_native_request(spec, measured_assets=None):
     require_supported_operation(spec)
     if spec['operation'] == 'text-to-image':
         require(measured_assets in (None, []), 'Text-to-image must not include measured assets')
+    if spec['operation'] in ('text-to-video', 'image-to-video'):
+        from .native_video import compile_native_video
+        return compile_native_video(spec, measured_assets)
     return compile_native_image(spec, measured_assets)
 
 

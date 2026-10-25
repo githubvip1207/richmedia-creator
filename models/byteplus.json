@@ -27,10 +27,6 @@
         "extend-video"
       ],
       "modes": {
-        "image-to-video": [
-          "first-frame",
-          "first-last-frame"
-        ],
         "reference-to-video": [
           "reference",
           "edit"
@@ -66,10 +62,6 @@
         "extend-video"
       ],
       "modes": {
-        "image-to-video": [
-          "first-frame",
-          "first-last-frame"
-        ],
         "reference-to-video": [
           "reference",
           "edit"
@@ -103,10 +95,6 @@
         "extend-video"
       ],
       "modes": {
-        "image-to-video": [
-          "first-frame",
-          "first-last-frame"
-        ],
         "reference-to-video": [
           "reference",
           "edit"
@@ -140,10 +128,6 @@
         "extend-video"
       ],
       "modes": {
-        "image-to-video": [
-          "first-frame",
-          "first-last-frame"
-        ],
         "reference-to-video": [
           "reference",
           "edit"

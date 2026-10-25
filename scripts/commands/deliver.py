@@ -15,11 +15,41 @@ from core.assets import sha256_file
 from providers import get_provider
 
 
+def video_metadata(path):
+    """Inspect actual decoded frames, dimensions, duration and audio presence."""
+    probe = shutil.which('ffprobe')
+    require(probe is not None, 'ffprobe is required to validate downloaded videos')
+    try:
+        with open(path, 'rb') as stream:
+            head = stream.read(12)
+        require(len(head) >= 12 and head[4:8] == b'ftyp', 'Invalid MP4/MOV container')
+        result = subprocess.run([probe, '-v', 'error', '-count_frames', '-show_streams',
+                                 '-show_format', '-of', 'json', str(path)],
+                                capture_output=True, text=True, timeout=60)
+        data = json.loads(result.stdout)
+        stream = next(s for s in data['streams'] if s.get('codec_type') == 'video')
+        duration = float(data.get('format', {}).get('duration', stream.get('duration', 0)))
+        require(result.returncode == 0 and not result.stderr.strip() and duration > 0
+                and stream.get('width', 0) > 0 and stream.get('height', 0) > 0
+                and int(stream.get('nb_read_frames', 0)) > 0, 'Invalid video stream')
+        return {'width': stream['width'], 'height': stream['height'], 'duration': duration,
+                'codec': stream.get('codec_name'), 'frame_rate': stream.get('avg_frame_rate'),
+                'has_audio': any(s.get('codec_type') == 'audio' for s in data['streams'])}
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, StopIteration):
+        raise ValueError('Downloaded video has no valid decodable video stream') from None
+
+
 def valid_media(path, kind, expected_size=None, require_alpha=False):
     with open(path,'rb') as f:
         head = f.read(32)
     if kind == 'video':
-        return len(head)>8 and head[4:8] == b'ftyp'
+        if not (len(head)>8 and head[4:8] == b'ftyp'):
+            return False
+        try:
+            video_metadata(path)
+            return True
+        except ValueError:
+            return False
     if not (head.startswith((b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')) or
             (head.startswith(b'RIFF') and head[8:12] == b'WEBP')):
         return False
@@ -178,8 +208,12 @@ def _download(submission):
             else:
                 tmp = path
             expected_size = entry['size'] if is_layer else plan['compiled']['parameters'].get('size')
-            valid = (valid_media(tmp, kind, expected_size, require_alpha=entry['z_index'] > 0)
-                     if is_layer else valid_media(tmp, kind, expected_size))
+            actual_metadata = video_metadata(tmp) if kind == 'video' else None
+            if actual_metadata:
+                valid = True
+            else:
+                valid = (valid_media(tmp, kind, expected_size, require_alpha=entry['z_index'] > 0)
+                         if is_layer else valid_media(tmp, kind, expected_size))
             require(valid,
                     'Downloaded content is not valid media; retained file for inspection')
             if kind == 'image':
@@ -192,6 +226,7 @@ def _download(submission):
                 os.replace(str(tmp), str(path))
             # 清单保留供应商、模型、任务、原始图层元数据和哈希；剔除庞大 Base64 正文。
             manifest.append({'path':str(path),'sha256':sha256_file(path),'kind':kind,
+                             **({'metadata': actual_metadata} if actual_metadata else {}),
                              'origin':{k:v for k,v in entry.items() if k != 'b64_json'},
                              'provider':plan['compiled']['provider'], 'model':plan['compiled']['payload_template']['model'],
                              'task_id':state.get('task_id'), 'downloaded_at':now(), 'original':True})
@@ -274,7 +309,7 @@ def deliver(submission, destination=None):
             if item is result.get('metadata'):
                 delivered['metadata'] = final
             else:
-                final.update({k: item[k] for k in ('kind', 'provider', 'model') if k in item})
+                final.update({k: item[k] for k in ('kind', 'provider', 'model', 'metadata') if k in item})
                 delivered['files'].append(final)
             write(record_path, record)
         record['execution']['delivery_complete'] = True

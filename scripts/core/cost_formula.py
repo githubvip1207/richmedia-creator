@@ -44,7 +44,7 @@ def target_asset(compiled, context):
 
 def adaptive_dimensions(compiled, source):
     """Only infer documented 2.5 source-preserving cases with a known table ratio."""
-    if compiled['provider'] != 'volcengine' or compiled['model'] != 'seedance-2.5' or source is None:
+    if compiled['provider'] not in ('volcengine', 'byteplus') or compiled['model'] != 'seedance-2.5' or source is None:
         return None
     metadata = source.get('metadata', {})
     width, height = metadata.get('width'), metadata.get('height')

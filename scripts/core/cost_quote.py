@@ -63,7 +63,7 @@ def compile_cost_inputs(inputs, measured_assets=None):
         resolution, ratio, duration = (inputs.get(k) for k in ('resolution', 'ratio', 'duration'))
         require(resolution in m['resolutions'], 'Invalid resolution')
         from .request import RATIOS
-        locked = model == 'seedance-2.5' and op in ('first-frame', 'first-last-frame', 'edit-video', 'extend-video')
+        locked = op in ('first-frame', 'first-last-frame') or (model == 'seedance-2.5' and op in ('edit-video', 'extend-video'))
         require(ratio in (['adaptive'] if locked else RATIOS), 'Invalid ratio for operation')
         require(type(duration) is int and (duration == -1 or 4 <= duration <= m['max_duration']), 'Invalid duration')
         require(not (model == 'seedance-2.5' and op == 'edit-video') or duration == -1, 'Seedance 2.5 editing requires duration=-1')

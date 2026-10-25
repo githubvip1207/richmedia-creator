@@ -42,7 +42,7 @@ class FormulaDependencies(unittest.TestCase):
         cases = [
             {'operation':'reference-to-video', 'mode': 'reference'},
             {'assets':[self.asset('audio')]},
-            {'operation':'image-to-video', 'mode': 'first-frame','ratio':'adaptive','assets':[self.asset('image'),self.asset('audio')]},
+            {'operation':'image-to-video', 'ratio':'adaptive','assets':[self.asset('image'),self.asset('audio')]},
             {'operation':'reference-to-video', 'mode': 'reference','model':'seedance-2.0','assets':[self.asset('audio')]},
             {'operation':'reference-to-video', 'mode': 'reference','assets':[self.asset('audio','short')]},
             {'operation':'reference-to-video', 'mode': 'reference','assets':[self.asset('audio')]*11},
@@ -63,7 +63,7 @@ class FormulaDependencies(unittest.TestCase):
         self.assertEqual(quote['calculation']['unit_price_per_million_tokens'],70)
 
     def test_first_and_last_frame_uses_first_image_ratio_not_input_pixels(self):
-        quote = self.quote(operation='image-to-video', mode='first-last-frame',ratio='adaptive',
+        quote = self.quote(operation='image-to-video', ratio='adaptive',
                            assets=[self.asset('image','portrait'),self.asset('image')])
         estimate = quote['calculation']
         self.assertEqual(estimate['assumed_output_dimensions'],[480,854])
@@ -71,11 +71,11 @@ class FormulaDependencies(unittest.TestCase):
         self.assertEqual(quote['result']['status'],'estimate')
         self.assertEqual(estimate['tokens'],[math.ceil(4*480*854*24/1024)]*2)
         with self.assertRaises(ValueError):
-            self.quote(operation='image-to-video', mode='first-last-frame',ratio='adaptive',
+            self.quote(operation='image-to-video', ratio='adaptive',
                        assets=[self.asset('image'),self.asset('image')],estimate_context={'target_asset_index':1})
 
     def test_unknown_adaptive_has_an_accepted_resolution_input(self):
-        inputs = {**self.base,'operation':'image-to-video', 'mode': 'first-frame','ratio':'adaptive',
+        inputs = {**self.base,'operation':'image-to-video', 'ratio':'adaptive',
                   'assets':[self.asset('image','arbitrary')]}
         unknown = calculate_asset_inputs(inputs)
         self.assertEqual(unknown['result']['status'],'unknown')
@@ -84,17 +84,17 @@ class FormulaDependencies(unittest.TestCase):
         quote = calculate_asset_inputs(inputs)
         self.assertEqual(quote['result']['status'],'estimate')
         self.assertEqual(quote['calculation']['assumed_output_dimensions'],[728,560])
-        spec = {'provider':'volcengine','model':'seedance-2.5','operation':'image-to-video', 'mode': 'first-frame','prompt':'测试',
-                'parameters':{'resolution':'480p','ratio':'adaptive','duration':4},
-                'optimizer':{'skill':'sd25-pe','status':'applied'},
-                'assets':[{**inputs['assets'][0],'purpose':'首帧','role':'first_frame',
-                           'metadata':self.measure(inputs['assets'][0])['metadata']}]}
-        with self.assertRaisesRegex(ValueError, 'Only basic text-to-image'):
-            consume_quote(as_native(spec), quote)
+        from test_native_video import request
+        spec = request(mode='first-frame')
+        spec['assets'] = [{**inputs['assets'][0], 'id': 'frame', 'purpose': '首帧'}]
+        # Cost assets without an id intentionally cannot bind to a submission.
+        inputs['assets'][0]['id'] = 'frame'
+        quote = calculate_asset_inputs(inputs)
+        consume_quote(spec, quote)
         changed = copy.deepcopy(spec)
         changed['estimate_context'] = {'output_dimensions':[640,640]}
-        with self.assertRaisesRegex(ValueError,'Only basic text-to-image'):
-            consume_quote(as_native(changed),quote)
+        with self.assertRaisesRegex(ValueError, 'differs from cost artifact'):
+            consume_quote(changed, quote)
 
     def test_edit_target_and_floor_range_resolve_all_formula_dependencies(self):
         assets=[self.asset('video'),self.asset('video','portrait-long')]
@@ -146,6 +146,6 @@ class FormulaDependencies(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             run = subprocess.run([sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', tmp],
                                  input=json.dumps(self.base), capture_output=True, text=True, cwd=tmp)
-            self.assertNotEqual(run.returncode, 0)
-            self.assertIn('Only basic text-to-image', run.stderr)
-            self.assertFalse((Path(tmp)/'volcengine-priceing.json').exists())
+            self.assertEqual(run.returncode, 0, run.stderr)
+            self.assertEqual(json.loads(run.stdout)['result']['status'], 'estimate')
+            self.assertTrue((Path(tmp)/'volcengine-priceing.json').exists())

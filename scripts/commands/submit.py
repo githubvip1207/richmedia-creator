@@ -34,6 +34,8 @@ def validate_requirement(directory, spec, compiled):
             'Submission model/operation differs from request.json; update the plan and reconfirm')
     parameters = selected.get('parameters')
     require(isinstance(parameters, dict), 'Supplier parameters missing from request.json')
+    default_tools = ([{'type': 'web_search'}]
+                     if compiled['kind'] == 'video' and compiled['provider'] == 'volcengine' else [])
     for key, value in parameters.items():
         # Image composition preferences live in the unchanged prompt, not an API ratio field.
         if compiled['kind'] == 'image' and key == 'ratio':
@@ -46,12 +48,25 @@ def validate_requirement(directory, spec, compiled):
                     raise ValueError('Invalid image ratio in request.json') from None
                 require(width * denominator == height * numerator, 'Pixel dimensions differ from request.json ratio')
             continue
+        if compiled['kind'] == 'video' and key == 'tools':
+            require(compiled['parameters'].get('tools', []) == value,
+                    'Submission search settings differ from request.json; update and reconfirm')
+            continue
         require(compiled['parameters'].get(key) == value,
                 'Submission parameter ' + key + ' differs from request.json; update the plan and reconfirm')
-    if compiled['kind'] == 'image':
-        require('size' in parameters, 'Image size missing from request.json supplier parameters')
-        if spec['operation'] == 'text-to-image':
-            require(selected.get('assets') == [], 'Text-to-image supplier assets must be empty')
+    if compiled['kind'] == 'video':
+        require(parameters.get('tools', default_tools) == compiled['parameters'].get('tools', default_tools),
+                'Submission search settings differ from request.json; update and reconfirm')
+        required = {'resolution', 'duration', 'generate_audio'}
+        if compiled['operation'] == 'text-to-video':
+            required.add('ratio')
+        require(required <= set(parameters),
+                'Video decision parameters missing from request.json; update the plan and reconfirm')
+    if compiled['kind'] in ('image', 'video'):
+        if compiled['kind'] == 'image':
+            require('size' in parameters, 'Image size missing from request.json supplier parameters')
+        if spec['operation'] in ('text-to-image', 'text-to-video'):
+            require(selected.get('assets') == [], 'Text generation supplier assets must be empty')
         else:
             catalog = record.get('assets')
             refs = selected.get('assets')

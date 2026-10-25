@@ -88,15 +88,15 @@ class IndependentCosts(unittest.TestCase):
         run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
         self.assertEqual(store.read(self.root/'byteplus-priceing.json')['result']['currency'], 'USD')
 
-    def test_cli_multiple_input_videos_and_unknown_floor(self):
+    def test_cli_text_video_quotes_for_both_suppliers(self):
         args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]
         for provider in ('volcengine', 'byteplus'):
             inputs = {'provider': provider, 'model': 'seedance-2.0', 'operation': 'text-to-video',
                       'resolution': '480p', 'ratio': '16:9', 'duration': 4}
             result = subprocess.run(args, cwd=self.root, capture_output=True, text=True, input=json.dumps(inputs))
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('Only basic text-to-image', result.stderr)
-            self.assertFalse((self.root/(provider + '-priceing.json')).exists())
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)['result']['status'], 'estimate')
+            self.assertTrue((self.root/(provider + '-priceing.json')).exists())
 
     def test_stdin_invalid_json_creates_no_cost_file(self):
         args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]

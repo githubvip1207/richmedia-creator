@@ -62,7 +62,7 @@ def compile_request(spec, measured_assets=None):
             require('resolution' in p and 'duration' in p, 'Extension needs explicit resolution and duration; do not apply low-cost creation defaults')
         setting('resolution', '480p', m['resolutions'])
         # 2.5 编辑/延长/首尾帧按模型规则锁定 adaptive；普通文生视频默认 16:9。
-        locked = alias == 'seedance-2.5' and op in ('first-frame', 'first-last-frame', 'edit-video', 'extend-video')
+        locked = op in ('first-frame', 'first-last-frame') or (alias == 'seedance-2.5' and op in ('edit-video', 'extend-video'))
         setting('ratio', 'adaptive' if op != 'text-to-video' else '16:9', ['adaptive'] if locked else RATIOS)
         edit25 = alias == 'seedance-2.5' and op == 'edit-video'
         # 2.5 编辑只允许 -1；其他任务允许自动时长或从四秒到模型上限的整数。
