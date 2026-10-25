@@ -126,17 +126,8 @@ def submit(jobdir, spec, approval_text, accept_uncertain=False):
                 require(isinstance(result.get('id'),str) and bool(result['id']), 'POST response did not contain task ID')
                 state.update(state='queued',task_id=result['id'])
             else:
-                require(isinstance(result.get('data'),list) and bool(result['data']), 'Image response missing output data')
-                require(all(isinstance(x, dict) for x in result['data']), 'Invalid image result entry')
-                require(all(x.get('error') or isinstance(x.get('url'), str) and x['url'].startswith('https://')
-                            or isinstance(x.get('b64_json'), str) and bool(x['b64_json']) for x in result['data']),
-                        'Image result missing usable output')
-                outputs = [x for x in result['data'] if not x.get('error')]
-                require(len(outputs) <= compiled['quantity'], 'Image output count differs from confirmed quantity')
-                errors = [response_error(x['error'], secrets=(compiled['prompt'],)).details
-                          for x in result['data'] if x.get('error')]
-                image_state = 'failed' if len(errors) == len(result['data']) else ('partial_failed' if errors else 'succeeded')
-                state.update(state=image_state,usage=result.get('usage'), errors=errors)
+                from commands.status import image_response_state
+                state.update(image_response_state(result, compiled))
         # 有不确定性的供应商错误或响应处理异常保留 submission_unknown；明确拒绝才记 rejected。
         except Exception as exc:
             state.update(state='submission_unknown' if not isinstance(exc,ProviderError) or exc.uncertain else 'rejected',

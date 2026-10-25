@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import submit, download, status
+from commands import submit, deliver as download, status
 from core import submission_store as store
 from core.assets import inspect_asset
 from core.envfile import read_config
@@ -78,14 +78,14 @@ class ReviewRegressions(unittest.TestCase):
                 store.write(self.work/'submit-001.json', record)
                 with patch.object(download, 'download_url', side_effect=lambda url, path: path.write_bytes(data)):
                     with self.assertRaisesRegex(ValueError, 'valid media'):
-                        download.download(self.work/'submit-001.json')
+                        download._download(self.work/'submit-001.json')
                 self.assertFalse(store.read(self.work/'submit-001.json')['execution']['download_complete'])
 
     def test_valid_image_can_be_decoded_and_reused_without_network(self):
         state = self.post({'data': [{'url': 'https://example.com/out.png'}]})
         with patch.object(download, 'download_url', side_effect=lambda url, path: path.write_bytes(png())) as get:
-            result = download.download(state['submission'])
-            download.download(state['submission'])
+            result = download._download(state['submission'])
+            download._download(state['submission'])
             get.assert_called_once()
         self.assertTrue(store.read(state['submission'])['execution']['download_complete'])
         self.assertEqual(Path(result['files'][0]['path']).read_bytes(), png())
@@ -124,6 +124,6 @@ class ReviewRegressions(unittest.TestCase):
         store.write(path, record)
         with patch.object(download, 'download_url') as get:
             with self.assertRaisesRegex(ValueError, 'differs from confirmed format'):
-                download.download(path)
+                download._download(path)
             get.assert_not_called()
         self.assertFalse(store.read(path)['execution']['download_complete'])

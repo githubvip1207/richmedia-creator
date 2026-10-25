@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import submit as submit_command, download as download_command
+from commands import submit as submit_command, deliver as download_command
 from core.request import compile_request
 from core.cost_quote import consume_quote
 from cost_fixture import calculate, save_with_cost
@@ -55,7 +55,7 @@ class NativeBytePlus(unittest.TestCase):
                     state=submit_command.submit(work,spec,'TEST CONFIRMATION')
                 post.assert_called_once_with('POST','/images/generations',spec['payload'])
                 other.assert_not_called()
-                result=download_command.download(state['submission'])
+                result=download_command._download(state['submission'])
                 record=store.read(state['submission'])
                 self.assertEqual(record['payload'],spec['payload'])
                 self.assertTrue(record['execution']['download_complete'])

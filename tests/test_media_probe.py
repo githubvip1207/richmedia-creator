@@ -9,6 +9,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from core.media_probe import calculate_asset_inputs, probe_asset
 from core import submission_store as store
+from test_runtime import png
 
 
 class CostAssets(unittest.TestCase):
@@ -16,7 +17,7 @@ class CostAssets(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.source = Path(self.tmp.name)/'input.png'
-        self.source.touch()
+        self.source.write_bytes(png())
 
     def image_input(self):
         return {'provider':'volcengine', 'model':'seedream-5.0-pro', 'operation':'image-to-image',

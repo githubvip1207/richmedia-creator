@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import download
+from commands import deliver as download
 
 
 class CurlDownload(unittest.TestCase):

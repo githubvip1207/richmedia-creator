@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import submit as submit_command, download as download_command
+from commands import submit as submit_command, deliver as download_command
 from core.request import compile_request
 from cost_fixture import calculate, save_with_cost
 from core import submission_store as store
@@ -89,14 +89,14 @@ class NativePayload(unittest.TestCase):
             with config_fixture({'VOLCENGINE_API_KEY': 'fixture-only'}), \
                     patch.object(volcengine, 'request', return_value=response) as post:
                 submit_command.submit(work, self.spec, 'TEST FIRST CONFIRMATION')
-                first = download_command.download(work)
+                first = download_command._download(work)
                 first_path = Path(first['files'][0]['path'])
                 first_bytes = first_path.read_bytes()
                 with self.assertRaises(ValueError):
                     submit_command.submit(work, self.spec, '')
                 self.assertEqual(post.call_count, 1)
                 submit_command.submit(work, self.spec, 'TEST SECOND CONFIRMATION')
-                second = download_command.download(work)
+                second = download_command._download(work)
                 self.assertEqual(post.call_count, 2)
             self.assertEqual(store.read(work/'submit-001.json')['response'], response)
             self.assertEqual(store.read(work/'submit-002.json')['response'], response)
@@ -104,6 +104,6 @@ class NativePayload(unittest.TestCase):
             self.assertTrue(store.read(work/'submit-001.json')['result']['files'])
             self.assertIn('output-002', second['files'][0]['path'])
             self.assertEqual(first_path.read_bytes(), first_bytes)
-            self.assertEqual(download_command.download(work/'submit-001.json')['files'][0]['path'], str(first_path))
+            self.assertEqual(download_command._download(work/'submit-001.json')['files'][0]['path'], str(first_path))
             for old_name in ('job.json', 'response.json', 'result.json', 'submit-001-job.json', 'submit-001-result.json'):
                 self.assertFalse((work/old_name).exists())

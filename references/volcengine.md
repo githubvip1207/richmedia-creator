@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | 文生图 | — | Seedream 5.0 Pro > Seedream 5.0 Flash | 已实现 | [文生图](#文生图operationtext-to-image) |
 | 图生图 | 单图编辑、多图融合、局部编辑 | Seedream 5.0 Pro > Seedream 5.0 Flash | 已实现 | [图生图](#图生图operationimage-to-image) |
-| 图层拆分 | — | Seedream 5.0 Pro > Seedream 5.0 Flash | 未实现 | — |
+| 图层拆分 | — | Seedream 5.0 Pro > Seedream 5.0 Flash | 已实现 | [图层拆分](#图层拆分operationdecompose-layers) |
 | 文生视频 | — | Seedance 2.5 > Seedance 2.0 > Seedance 2.0 Fast > Seedance 2.0 Mini | 未实现 | — |
 | 图生视频 | 首帧、首尾帧 | Seedance 2.5 > Seedance 2.0 > Seedance 2.0 Fast > Seedance 2.0 Mini | 未实现 | — |
 | 参考生视频 | 参考生成、视频编辑 | Seedance 2.5 > Seedance 2.0 > Seedance 2.0 Fast > Seedance 2.0 Mini；纯音频参考仅 Seedance 2.5 | 未实现 | — |
@@ -89,7 +89,7 @@
   "provider": "volcengine", // 必需：供应商；Python 自行读取 models/volcengine-pricing.json，不传单价或文件路径
   "model": "seedream-5.0-flash", // 必需：模型别名或准确 ID；Python 读取该模型的 layer 费率
   "operation": "decompose-layers", // 必需：图层拆分，不提供 mode
-  "size": "auto", // 必需：auto 或模型支持的尺寸档位；不能据此确定各张未来图层的尺寸
+  "size": "1K", // 必需：与已确定的输出规格一致；用户未指定时默认最小尺寸，支持明确指定 auto；不能据此确定各张未来图层的尺寸
   "assets": [ // 必需：只能提供 1 张待拆分图片，Python 校验数量并读取尺寸
     {
       "id": "layer-source", // 素材标识：与初始化记录中的 id 一致，仅用于关联，不参与计费
@@ -193,8 +193,8 @@
    }
    ```
 2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 "$SKILL/scripts/main.py" submit` 提交生成任务。使用本次任务文件目录 `$WORK` 作为 `--workdir`。脚本校验通过后将已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。任务文件目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
-3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/main.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
-4. **下载或保存图片：** 调用 `python3 "$SKILL/scripts/main.py" download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
+3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/main.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续交付。
+4. **交付结果：** 调用 `python3 "$SKILL/scripts/main.py" deliver` 获取并校验生成结果，将最终媒体交付到启动本技能时所在的当前项目目录，图层拆分同时交付位置元数据，并返回交付文件清单。完成后进入主流程的内容核验与结果展示步骤。
 
 
 ### 图生图（`operation=image-to-image`）
@@ -258,10 +258,78 @@
    ```
 
 2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 "$SKILL/scripts/main.py" submit` 提交生成任务。使用本次任务文件目录 `$WORK` 作为 `--workdir`。脚本校验通过后将已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。任务文件目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
-3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/main.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续下载。
-4. **下载或保存图片：** 调用 `python3 "$SKILL/scripts/main.py" download` 下载或保存图片或视频，并返回文件清单。完成后进入主流程的结果核验与交付步骤。
+3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/main.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续交付。
+4. **交付结果：** 调用 `python3 "$SKILL/scripts/main.py" deliver` 获取并校验生成结果，将最终媒体交付到启动本技能时所在的当前项目目录，图层拆分同时交付位置元数据，并返回交付文件清单。完成后进入主流程的内容核验与结果展示步骤。
 
 图生图核验时，检查修改区域、产品、身份、文字及保留内容；多图融合还须检查各参考图的用途、主体关系和顺序是否符合确认要求。
+
+### 图层拆分（`operation=decompose-layers`）
+
+#### 生成要求
+
+- 参数要求
+
+| 参数 | 必须性 | 可选项 / 默认值 |
+|---|---|---|
+| `prompt` | 必需 | |
+| `size` | 必需 | 参考模型列表中的尺寸约束；用户未指定时默认最小尺寸；已指定时按用户要求 |
+| `assets` | 必需 | 待拆分图片 1 张。提供本地绝对路径或 HTTPS URL。 |
+
+- 素材要求
+
+支持 JPEG、PNG。图片不超过 30 MiB，总像素为 262144～3600 万，宽高比为 1/16～16。素材来源须为本地绝对路径或可访问的 HTTPS URL，按下方示例填写外层 `assets`。
+
+- 提示词优化
+
+在主流程第 2 步落实本节生成要求时确定最终提示词，供估价和确认单使用；以下生成步骤只使用已确认的最终提示词，不再改写。
+本能力要求使用 `sd25-pe` 优化提示词，仅应用与当前图片能力相关的规则，最终提示词须符合所选模型的要求。用户明确要求不优化时，按主流程将完整拼接的 `original_prompt` 原样赋给 `optimized_prompt`，不调用本地提示词优化，也不主动启用供应商服务端提示词优化。如所选模型无法关闭服务端优化，先说明限制并取得用户接受，再提交。
+
+图层拆分提示词须结合实际参考图，明确需要拆分的对象；未指定具体对象时，在提示词中表达拆分主要元素的要求。
+
+- 图层拆分
+
+输出尺寸支持 `1K`、`1.5K`、`2K`、`auto`，不支持准确 WxH。
+
+可用自然语言指定拆分对象，或在输入图上标记辅助定位；需要精确指定区域时，使用 `<bbox>x1 y1 x2 y2</bbox>`。坐标须为 0～999 的归一化整数，框从左上到右下且面积非零；先核对实际区域，不编造坐标。依据：[官方教程“图层拆分 → 提示词输入方式”](https://docs.volcengine.com/docs/ark/seedream-5-0-pro?lang=zh)。
+
+一次请求返回 1 张底图和最多 16 张带透明通道的 PNG 图层，实际数量由模型决定。
+
+#### 生成步骤
+
+以下步骤在用户需要图层拆分且确认当前 Volcengine 方案后执行。
+
+1. **构建任务 JSON：** 参考如下示例，基于用户输入的参数和确认的供应商、模型和能力，生成任务 JSON 数据。移除行尾注释后，将严格 JSON 直接追加到下一步命令的标准输入中。
+
+   ```jsonc
+   {
+     "provider": "volcengine", // 必需：供应商，供脚本选择对应适配器
+     "operation": "decompose-layers", // 必需：能力，供脚本选择接口及结果处理方式
+     "original_prompt": "拆出图片中的人物和标题文字", // 流程记录：用户原始提示词，不提交给供应商
+     "assets": [ // 必需：本方案使用的素材，由脚本解析，不直接提交给供应商
+       {
+         "id": "layer-source", // 必需：任务内唯一标识，供供应商引用；不是供应商素材 ID
+         "kind": "image", // 必需：image、video 或 audio；本能力仅接受 image
+         "source": "/absolute/path/poster.png", // 必需：执行前替换为实际 HTTPS URL 或本地绝对路径
+         "purpose": "待拆分的海报，提取人物与标题文字" // 必需：素材用途，只在这里记录一次
+       }
+     ],
+     "payload": { // 必需：火山引擎请求参数，脚本校验模型、参数及需求记录，解析外层 assets 并填充素材字段后提交，不改写提示词；调用约定见脚本操作手册“提交生成”
+       "model": "doubao-seedream-5-0-flash-260915", // 必需：准确模型 ID；使用 Pro 时替换为对应 ID
+       "prompt": "将图片1中的人物和标题文字分别拆分为独立图层。", // 必需：读取当前 request.json 的 optimized_prompt，须与确认单一致，不再改写
+       "image": [], // 由 Python 根据外层 assets 按顺序填充；此处留空数组或省略，不手工填写素材
+       "size": "1K", // 本 skill 必需：1K、1.5K、2K 或 auto；用户未指定时默认最小尺寸
+       "output_format": "png", // 固定：PNG
+       "response_format": "url", // 固定：返回 URL
+       "watermark": false, // 固定：不加平台水印
+       "background": "opaque", // 固定：底图不启用透明背景，前景图层仍带透明通道
+       "layer_decomposition": true // 固定：图层拆分启用；optimize_prompt_options 固定省略
+     }
+   }
+   ```
+
+2. **调用脚本提交生成：** 使用上一步构建的 JSON 对象通过 `python3 "$SKILL/scripts/main.py" submit` 提交生成任务。使用本次任务文件目录 `$WORK` 作为 `--workdir`。脚本校验通过后将已确认的完整请求保存为 `$WORK/payload.json`；每次提交及其输出分别保存为 `submit-NNN.json` 和 `output-NNN/`。任务文件目录、提交序号及记录文件由脚本管理；记录返回的当前序号，并将提交文件路径记为 `$SUBMISSION`，供后续使用，不自行递增编号或拼接路径。命令示例见脚本操作手册。
+3. **判断生成结果：** 调用 `python3 "$SKILL/scripts/main.py" status` 检查生成任务状态，如果失败则提示用户，如果成功则继续交付。
+4. **交付结果：** 调用 `python3 "$SKILL/scripts/main.py" deliver` 获取并校验生成结果，将最终媒体交付到启动本技能时所在的当前项目目录，图层拆分同时交付位置元数据，并返回交付文件清单。完成后进入主流程的内容核验与结果展示步骤。
 
 ## 官方来源
 

@@ -26,9 +26,14 @@ def number(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
-def validate_edit_coordinates(prompt):
+def validate_edit_coordinates(prompt, *, allow_point=True):
     """Validate explicit interaction tags without changing the confirmed text."""
-    for tag, body in re.findall(r'<(point|bbox)>(.*?)</\1>', prompt, flags=re.S):
+    require(allow_point or not re.search(r'</?point\b', prompt),
+            'Layer decomposition supports bbox region tags only')
+    pattern = r'<(point|bbox)>(.*?)</\1>'
+    remainder = re.sub(pattern, '', prompt, flags=re.S)
+    require(not re.search(r'</?(?:point|bbox)\b', remainder), 'Coordinate tags must be complete matching pairs')
+    for tag, body in re.findall(pattern, prompt, flags=re.S):
         values = body.split()
         require(len(values) == (2 if tag == 'point' else 4)
                 and all(re.fullmatch(r'[0-9]+', v) and 0 <= int(v) <= 999 for v in values),
@@ -38,17 +43,18 @@ def validate_edit_coordinates(prompt):
             require(coords[0] < coords[2] and coords[1] < coords[3], 'bbox corners must be ordered and nonempty')
 
 
-def compile_image_assets(inputs, measured_assets):
+def compile_image_assets(inputs, measured_assets, operation="image-to-image"):
     """Bind ordered image sources to the measured quote; encode only at POST time."""
     from .assets import inspect_asset
     from .media_probe import validate_image_metadata
-    require(isinstance(inputs, list) and 1 <= len(inputs) <= 10,
-            'image-to-image requires 1..10 outer assets')
+    maximum = 1 if operation == 'decompose-layers' else 10
+    require(isinstance(inputs, list) and 1 <= len(inputs) <= maximum,
+            operation + ' requires 1..' + str(maximum) + ' outer assets')
     for item in inputs:
         require(isinstance(item, dict) and set(item) == {'id', 'kind', 'source', 'purpose'},
                 'Each outer asset requires id, kind, source and purpose')
         require(isinstance(item['id'], str) and bool(item['id'].strip()), 'Asset id must be a nonempty string')
-        require(item['kind'] == 'image', 'image-to-image accepts image assets only')
+        require(item['kind'] == 'image', operation + ' accepts image assets only')
     require(len({item['id'] for item in inputs}) == len(inputs), 'Asset ids must be unique')
     sources = [item['source'] for item in inputs]
     if measured_assets is not None:
@@ -74,7 +80,11 @@ def compile_image_assets(inputs, measured_assets):
                 asset['metadata'] = metadata
             if 'id' in measured:
                 asset['id'] = measured['id']
-        validate_image_metadata(asset['metadata'], require_dimensions=measured is not None)
+        if operation == 'decompose-layers':
+            from .media_probe import validate_layer_metadata
+            validate_layer_metadata(asset['metadata'])
+        else:
+            validate_image_metadata(asset['metadata'], require_dimensions=measured is not None)
         assets.append(asset)
     return assets
 
@@ -83,7 +93,7 @@ def compile_native_image(spec, measured_assets=None):
     """Validate the selected supplier image body without rewriting its prompt."""
     allowed = {'provider', 'operation', 'original_prompt', 'payload',
                'estimate_context', 'budget_cny', 'budget_usd', 'fx'}
-    if spec.get('operation') == 'image-to-image':
+    if spec.get('operation') in ('image-to-image', 'decompose-layers'):
         allowed.add('assets')
     require(not (set(spec) - allowed), 'Unsupported native request envelope fields')
     provider = spec.get('provider')
@@ -95,7 +105,7 @@ def compile_native_image(spec, measured_assets=None):
     require(isinstance(payload, dict), 'payload must be an object')
     fields = {'model', 'prompt', 'size', 'output_format', 'response_format', 'watermark',
               'background', 'optimize_prompt_options', 'layer_decomposition'}
-    if operation == 'image-to-image':
+    if operation in ('image-to-image', 'decompose-layers'):
         fields.add('image')
     require(not (set(payload) - fields), 'Unsupported native image payload fields: ' + str(sorted(set(payload) - fields)))
     models = CATALOGS[provider]['models']
@@ -107,17 +117,19 @@ def compile_native_image(spec, measured_assets=None):
     # The skill intentionally exposes a narrower contract than the supplier API.
     require('size' in payload, 'payload.size is required; resolve the documented default before submission')
     fixed = {'output_format': 'png', 'response_format': 'url', 'watermark': False,
-             'background': 'opaque', 'layer_decomposition': False}
+             'background': 'opaque', 'layer_decomposition': operation == 'decompose-layers'}
     for key, value in fixed.items():
         require(key in payload and type(payload[key]) is type(value) and payload[key] == value,
                 operation + ' requires ' + key + '=' + str(value))
     require('optimize_prompt_options' not in payload, operation + ' must omit optimize_prompt_options')
-    if operation == 'image-to-image':
+    if operation in ('image-to-image', 'decompose-layers'):
         require('image' not in payload or payload['image'] == [],
                 'Leave payload.image empty or omit it; provide image resources in outer assets')
-    assets = compile_image_assets(spec.get('assets'), measured_assets) if operation == 'image-to-image' else []
-    if operation == 'image-to-image':
-        validate_edit_coordinates(prompt)
+    assets = compile_image_assets(spec.get('assets'), measured_assets, operation) if operation in ('image-to-image', 'decompose-layers') else []
+    if operation in ('image-to-image', 'decompose-layers'):
+        from .assets import validate_image_request_size
+        validate_image_request_size(assets, payload)
+        validate_edit_coordinates(prompt, allow_point=operation != 'decompose-layers')
     params = {'size': payload['size'], **fixed}
     from .cost_quote import compile_cost_inputs
     compile_cost_inputs({'provider': provider, 'model': alias, 'operation': operation, 'input_images': len(assets),
@@ -128,12 +140,12 @@ def compile_native_image(spec, measured_assets=None):
     return {'provider': provider, 'model': alias, 'kind': 'image',
             'operation': operation, 'prompt': prompt, 'assets': assets,
             'parameters': params, 'payload_template': payload,
-            'warnings': [], 'quantity': 1, 'optimizer': None,
+            'warnings': [], 'quantity': 17 if operation == 'decompose-layers' else 1, 'optimizer': None,
             'original_prompt': spec.get('original_prompt')}
 
 
 def compile_native_request(spec, measured_assets=None):
-    """Basic text-to-image and image-to-image for both suppliers."""
+    """Native image operations for Volcengine and BytePlus."""
     require_supported_operation(spec)
     if spec['operation'] == 'text-to-image':
         require(measured_assets in (None, []), 'Text-to-image must not include measured assets')

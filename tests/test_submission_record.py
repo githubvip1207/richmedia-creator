@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from commands import submit as submit_command, status as status_command, download as download_command
+from commands import submit as submit_command, status as status_command, deliver as download_command
 from core import submission_store as store
 from cost_fixture import calculate, save_with_cost
 from providers import volcengine
@@ -40,8 +40,8 @@ class SubmissionRecord(unittest.TestCase):
         def download(url, path):
             path.write_bytes(b'\x00\x00\x00\x18ftypisom' + bytes(20))
         with patch.object(download_command, 'download_url', side_effect=download) as get:
-            result = download_command.download(self.record)
-            result = download_command.download(self.record)
+            result = download_command._download(self.record)
+            result = download_command._download(self.record)
             get.assert_called_once()
         self.assertTrue(Path(result['files'][0]['path']).is_file())
         record = store.read(self.record)

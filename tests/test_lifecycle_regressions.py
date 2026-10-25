@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
-from commands import submit as submit_command, download as download_command
+from commands import submit as submit_command, deliver as download_command
 from core import submission_store as store, media_probe as cost_assets
 from cost_fixture import save_with_cost
 from providers import volcengine, byteplus, transport
@@ -44,7 +44,7 @@ class ImageLifecycle(unittest.TestCase):
         self.assertEqual(len(record['execution']['errors']),2)
         with patch.object(download_command, 'download_url') as get:
             with self.assertRaises(ValueError):
-                download_command.download(state['submission'])
+                download_command._download(state['submission'])
         get.assert_not_called()
 
     def test_mixed_image_results_remain_partial_failed(self):
@@ -58,22 +58,22 @@ class ImageLifecycle(unittest.TestCase):
             from test_runtime import png
             path.write_bytes(png())
         with patch.object(download_command, 'download_url',side_effect=save):
-            result = download_command.download(record_path)
+            result = download_command._download(record_path)
         path = Path(result['files'][0]['path'])
         self.assertTrue(store.read(record_path)['execution']['download_complete'])
         path.write_bytes(b'damaged')
         with patch.object(download_command, 'download_url',side_effect=RuntimeError('fixture failure')):
             with self.assertRaises(RuntimeError):
-                download_command.download(record_path)
+                download_command._download(record_path)
         record = store.read(record_path)
         self.assertFalse(record['execution']['download_complete'])
         self.assertEqual(record['result']['files'],result['files'])
         self.assertEqual(record['execution']['state'],'succeeded')
         with patch.object(download_command, 'download_url',side_effect=save):
-            download_command.download(record_path)
+            download_command._download(record_path)
         self.assertTrue(store.read(record_path)['execution']['download_complete'])
         with patch.object(download_command, 'download_url') as get:
-            download_command.download(record_path)
+            download_command._download(record_path)
         get.assert_not_called()
 
 

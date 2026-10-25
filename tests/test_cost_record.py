@@ -15,6 +15,8 @@ class CostAudit(unittest.TestCase):
     def quote(self, data, fx=None):
         def measure(asset):
             metadata = {'width': 1200, 'height': 900}
+            if data['operation'] == 'decompose-layers':
+                metadata['mime'] = 'image/png'
             if asset['kind'] == 'video':
                 metadata.update(width=1280, height=720, duration=8.0)
             return {**asset, 'metadata': metadata}

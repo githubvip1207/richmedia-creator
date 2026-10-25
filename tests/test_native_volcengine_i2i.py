@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import init, estimate_cost, submit, status, download
+from commands import init, estimate_cost, submit, status, deliver as download
 from core.request import compile_request
 from core.cost_quote import consume_quote
 from core.media_probe import calculate_asset_inputs
@@ -96,8 +96,8 @@ class VolcengineImageToImage(unittest.TestCase):
                     self.assertTrue(status.run(SimpleNamespace(submission=state['submission'], wait=0))['success'])
                     query.assert_not_called()
                 with patch.object(download, 'download_url', side_effect=lambda url, path: path.write_bytes(png())) as get:
-                    result = download.download(state['submission'])
-                    download.download(state['submission'])
+                    result = download._download(state['submission'])
+                    download._download(state['submission'])
                     get.assert_called_once()
                 self.assertEqual(Path(result['files'][0]['path']).read_bytes(), png())
                 self.assertTrue(store.read(state['submission'])['execution']['download_complete'])

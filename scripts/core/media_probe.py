@@ -3,7 +3,7 @@ import copy
 import json
 import math
 import mimetypes
-from .assets import sha256_file
+from .assets import sha256_file, image_mime, validate_image_request_size
 import shutil
 import subprocess
 from pathlib import Path
@@ -47,6 +47,10 @@ def probe_asset(asset):
             require(type(w) is int and type(h) is int and w > 0 and h > 0, 'Invalid media dimensions')
             metadata.update(width=w, height=h)
             if kind == 'image':
+                metadata['mime'] = {'png': 'image/png', 'mjpeg': 'image/jpeg'}.get(stream.get('codec_name'))
+                byte_size = data.get('format', {}).get('size')
+                if byte_size is not None and str(byte_size).isdigit():
+                    metadata['bytes'] = int(byte_size)
                 pixel_format = stream.get('pix_fmt', '')
                 metadata['has_alpha'] = pixel_format in ('rgba', 'bgra', 'argb', 'abgr', 'ya8', 'ya16be', 'ya16le') or pixel_format.startswith(('yuva', 'gbrap'))
         if kind in ('video', 'audio'):
@@ -61,7 +65,7 @@ def probe_asset(asset):
     if local_hash is not None:
         require(sha256_file(source) == local_hash, 'Local asset changed during inspection; estimate again')
         metadata.update(sha256=local_hash, bytes=Path(source).stat().st_size,
-                        mime=mimetypes.guess_type(source)[0])
+                        mime=image_mime(source) if kind == 'image' else mimetypes.guess_type(source)[0])
     return {**({'id': asset['id']} if 'id' in asset else {}),
             'kind': kind, 'source': source, 'metadata': metadata}
 
@@ -78,13 +82,18 @@ def calculate_asset_inputs(inputs, fx=None):
     get_provider(inputs['provider'])
     assets = inputs.get('assets', [])
     require(isinstance(assets, list), 'assets must be an array')
-    if inputs['operation'] == 'image-to-image':
-        require(1 <= len(assets) <= 10 and all(isinstance(a, dict) and a.get('kind') == 'image' for a in assets),
-                'image-to-image requires 1..10 image assets')
+    if inputs['operation'] in ('image-to-image', 'decompose-layers'):
+        maximum = 1 if inputs['operation'] == 'decompose-layers' else 10
+        require(1 <= len(assets) <= maximum and all(isinstance(a, dict) and a.get('kind') == 'image' for a in assets),
+                inputs['operation'] + ' requires 1..' + str(maximum) + ' image assets')
     measured = [probe_asset(a) for a in assets]
-    if inputs['operation'] == 'image-to-image':
+    if inputs['operation'] in ('image-to-image', 'decompose-layers'):
         for asset in measured:
-            validate_image_metadata(asset['metadata'])
+            if inputs['operation'] == 'decompose-layers':
+                validate_layer_metadata(asset['metadata'])
+            else:
+                validate_image_metadata(asset['metadata'])
+        validate_image_request_size(measured)
     resolved = {k: v for k, v in inputs.items() if k not in ('assets', 'estimate_context')}
     resolved['input_images'] = sum(a['kind'] == 'image' for a in measured)
     resolved['input_video_seconds'] = [a['metadata']['duration'] for a in measured if a['kind'] == 'video']
@@ -108,3 +117,12 @@ def validate_image_metadata(metadata, require_dimensions=True):
         require(metadata['mime'] in ('image/jpeg', 'image/png', 'image/webp', 'image/bmp',
                                     'image/x-ms-bmp', 'image/tiff', 'image/gif', 'image/heic', 'image/heif'),
                 'Unsupported input image format')
+
+
+def validate_layer_metadata(metadata):
+    """Layer inputs use stricter format and minimum pixel limits than editing."""
+    validate_image_metadata(metadata)
+    require(metadata['width'] * metadata['height'] >= 262144,
+            'Layer input must have at least 262144 pixels')
+    require(metadata.get('mime') in ('image/png', 'image/jpeg'),
+            'Layer input must be verified PNG or JPEG')

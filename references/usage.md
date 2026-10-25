@@ -19,7 +19,7 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 | `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，返回 `workdir`、`quote` 及完整成本结果 | 无限制 |
 | `submit --workdir "$WORK" --approval-text '用户实际确认原文'` | 标准输入中的任务 JSON；也可用 `--request` 指定文件 | 提交一次生成请求，返回 `submission` 路径 | 必须沙箱外 |
 | `status --submission "$SUBMISSION"` | 已有提交文件路径 | 检查已有任务的执行状态，返回是否成功及错误原因 | 必须沙箱外 |
-| `download --submission "$SUBMISSION"` | 已有提交文件路径 | 下载且保存已有任务的生成结果 | 必须沙箱外 |
+| `deliver --submission "$SUBMISSION"` | 已有提交文件路径 | 获取、校验生成结果，并将最终媒体及图层元数据交付到当前项目目录 | 必须沙箱外 |
 
 表中“必须沙箱外”的命令从首次执行起即使用沙箱外环境，不先在受限沙箱中尝试。通过 `exec_command` 执行时，设置 `sandbox_permissions: "require_escalated"`，并在 `justification` 中说明联网用途。
 
@@ -36,7 +36,7 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 | `estimate-cost` | `scripts/commands/estimate_cost.py` |
 | `submit` | `scripts/commands/submit.py` |
 | `status` | `scripts/commands/status.py` |
-| `download` | `scripts/commands/download.py` |
+| `deliver` | `scripts/commands/deliver.py` |
 
 `core/` 保存共用逻辑：`submission_store.py` 管理记录和锁，`dependencies.py` 检查依赖，`media_probe.py` 实测计费素材，`cost_quote.py` 组织及核对报价，`cost_formula.py` 计算费用。`providers/` 保存供应商适配和网络传输。命令均通过 `main.py` 调用，不直接执行模块文件。
 
@@ -148,17 +148,36 @@ python3 "$SKILL/scripts/main.py" status --submission "$SUBMISSION" --wait 600
 {"success": true, "error": null}
 ```
 
-## 下载结果
+## 交付结果
 
-输出保存在当前 `$WORK` 下的 `output-NNN/`，与本次 `submit-NNN.json` 使用同一提交序号，以脚本返回的文件清单为准。URL 结果通过 HTTPS 下载；`b64_json` 结果由脚本解码保存。清单写入原提交文件的 `result.files`，包含本地路径、SHA256 及供应商来源信息。
+`deliver` 获取并校验指定提交的生成结果，将最终媒体交付到当前项目目录下的不冲突子目录；图层拆分同时交付 `layers.json`，其中的相对文件名与交付媒体一致。命令始终在启动本技能时所在的项目目录运行。
 
 ```bash
-python3 "$SKILL/scripts/main.py" download --submission "$SUBMISSION"
+python3 "$SKILL/scripts/main.py" deliver --submission "$SUBMISSION"
+
+# 返回如下结果
+{
+  "directory": "/project/richmedia-task-submit-001", # 交付目录的绝对路径
+  "files": [ # 最终媒体清单
+    {
+      "path": "/project/richmedia-task-submit-001/00-base.png", # 文件的绝对路径
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", # 文件的 SHA256
+      "kind": "image", # 媒体类型
+      "provider": "volcengine", # 供应商
+      "model": "doubao-seedream-5-0-flash-260915" # 准确模型 ID
+    }
+  ],
+  "delivered_at": "2026-10-24T13:00:00+00:00", # 交付时间，ISO 8601 格式
+  "metadata": { # 仅图层拆分返回：位置元数据文件
+    "path": "/project/richmedia-task-submit-001/layers.json", # 文件的绝对路径
+    "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" # 文件的 SHA256
+  }
+}
 ```
 
-## 最终文件交付
+脚本先检查生成状态，再将结果保存在 `$WORK/output-NNN/`，校验媒体完整性、格式、适用的尺寸要求及图层透明通道，随后复制到交付目录并核对 SHA256。返回结果写入提交文件的 `delivery`，全部文件交付并校验通过后设置 `execution.delivery_complete=true`。临时缓存清单保存在 `result`；请求、报价、响应及其他过程文件保留在任务目录，不交付给用户。
 
-下载并核验完成后，只将最终媒体复制到启动本技能时的当前项目目录；图层拆分同时复制位置元数据。保留临时目录中的请求、报价、提交记录和下载文件，不复制过程文件。例如启动目录是 `/project`，则按脚本返回的文件清单将最终文件复制到 `/project`，并提供交付文件的绝对路径链接或预览；同名文件使用不冲突的名称，避免覆盖。
+重复执行同一提交时，复用哈希匹配的缓存和交付文件；文件冲突或已交付文件被修改时创建新的交付目录，不覆盖已有文件。交付失败时保留原提交及已有文件，再次执行同一命令恢复，不重新生成。
 
 ## 运行文件及失败处理
 
@@ -169,7 +188,7 @@ python3 "$SKILL/scripts/main.py" download --submission "$SUBMISSION"
 | `$WORK/request.json` | 当前需求的原始输入和需求记录；每个任务文件目录各有一个 |
 | `$WORK/{供应商}-priceing.json` | 当前需求对应供应商的成本输入、计算过程和报价 |
 | `$WORK/payload.json` | 提交校验通过后由脚本保存的完整提交请求 |
-| `$WORK/submit-NNN.json` | 本次实际提交输入、`response`、`execution` 执行状态与 `result` 下载清单 |
+| `$WORK/submit-NNN.json` | 本次实际提交输入、`response`、`execution` 执行状态、`result` 缓存清单与 `delivery` 交付清单 |
 | `$WORK/output-NNN/*` | 本次提交的下载文件及下载中的临时文件 |
 
 供应商错误仅保留脱敏后的错误码、消息、请求 ID 及 HTTP 状态（若有），写入提交文件的 `response.error`；明确失败与结果未知分别处理，不因错误自动重发。
@@ -179,17 +198,17 @@ python3 "$SKILL/scripts/main.py" download --submission "$SUBMISSION"
 | 状态或问题 | 处理 |
 |---|---|
 | 提交前参数或报价校验失败 | 修正原因，涉及方案变化时重新估价并确认，再提交 |
-| `succeeded` | 调用 `download` 并核验内容，状态本身不代表交付完成 |
-| `partial_failed` | 存在成功项时可以下载，但不能按全部成功交付；检查错误后决定下一步 |
+| `succeeded` | 调用 `deliver` 完成交付后核验内容，状态本身不代表交付完成 |
+| `partial_failed` | 整次生成未成功，不执行完整交付；检查错误后决定下一步 |
 | `failed` | 生成失败，无成功输出可下载；检查错误，需要再次生成时取得新的确认 |
 | `rejected` | 根据已保存错误处理；需要重新生成时取得新的确认 |
 | 供应商返回人脸、人像或肖像相关错误 | 保留提交记录及错误码，向用户说明供应商实际返回的错误；仅在错误发生后告知，不在生成前要求人像来源、授权认证或可信期限核验。本技能不代办供应商认证或素材接入；需要再次付费生成时重新估价并取得确认，不自动重试 |
 | `submitting`、`submission_unknown`，或网络中断导致结果不明 | 保留提交记录，按对应供应商能力指南核对任务是否已受理、生成或计费；结果未明确前，不自动重新提交或切换供应商 |
-| 下载中断或失败 | 对同一个 `$SUBMISSION` 再次运行 `download`，不重新生成；已完成且哈希匹配的文件可复用 |
+| 获取或交付中断、失败 | 对同一个 `$SUBMISSION` 再次运行 `deliver`，不重新生成；已完成且哈希匹配的文件可复用 |
 | 图片内容不符合确认要求 | 说明具体差异；需要再次付费修正时重新确认 |
 
-只有生成成功、`execution.download_complete=true`、实际文件与 `result.files` 清单一致，并通过已确认要求的内容核验，才算任务完成。`status` 返回 `success=true` 仅表示生成成功，不表示下载或交付完成。
+只有生成成功、`execution.delivery_complete=true`、实际文件与 `delivery` 清单一致，并通过已确认要求的内容核验，才算任务完成。`status` 返回 `success=true` 仅表示生成成功，不表示下载或交付完成。
 
-媒体下载必须使用 `download` 命令，不得另写下载代码或绕过该命令。
+结果交付必须使用 `deliver` 命令，不得另写下载或复制代码绕过该命令。
 
 临时目录可能被系统清理，文件缺失不代表允许再次付费。原始响应及清单可能含临时签名 URL，不将其或 Base64 正文粘贴到聊天中。

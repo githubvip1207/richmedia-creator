@@ -1,4 +1,4 @@
-"""download: retrieve existing output media with resumable local manifests."""
+"""deliver: retrieve, validate and publish final outputs to the user directory."""
 import base64
 import http.client
 import json
@@ -15,7 +15,7 @@ from core.assets import sha256_file
 from providers import get_provider
 
 
-def valid_media(path, kind, expected_size=None):
+def valid_media(path, kind, expected_size=None, require_alpha=False):
     with open(path,'rb') as f:
         head = f.read(32)
     if kind == 'video':
@@ -31,6 +31,11 @@ def valid_media(path, kind, expected_size=None):
              '-show_frames', '-of', 'json', str(path)],
             capture_output=True, text=True, timeout=30)
         data = json.loads(result.stdout)
+        if require_alpha:
+            formats = [stream.get('pix_fmt', '') for stream in data.get('streams', [])]
+            if not any(fmt in ('rgba', 'bgra', 'argb', 'abgr', 'ya8', 'ya16be', 'ya16le')
+                       or fmt.startswith(('yuva', 'gbrap')) for fmt in formats):
+                return False
         if expected_size and 'x' in expected_size:
             width, height = map(int, expected_size.split('x'))
             if not any(s.get('width') == width and s.get('height') == height
@@ -105,12 +110,12 @@ def download_url(url, destination):
                           else str(error) if str(error).startswith('Media transport curl exit ')
                           else type(error).__name__)
                 raise RuntimeError('Media download failed after %s attempt(s): %s; '
-                                   'generation is preserved, retry download only' % (attempt + 1, detail)) from None
+                                   'generation is preserved, retry deliver only' % (attempt + 1, detail)) from None
             # 第一次失败等待两秒，第二次等待四秒；第三次失败退出，不无限重试。
             time.sleep(2 ** (attempt + 1))
 
 
-def download(submission):
+def _download(submission):
     record_path = submission_path(submission)
     d = record_path.parent
     with lock(d):
@@ -133,7 +138,11 @@ def download(submission):
         output.mkdir(mode=0o700,parents=True,exist_ok=True)
         # 图片保留每个非错误 data 项；视频同时处理主视频和可选末帧。
         if plan['compiled']['kind'] == 'image':
-            entries = [(x,'image') for x in result.get('data',[]) if not x.get('error')]
+            if plan['compiled'].get('operation') == 'decompose-layers':
+                from core.layers import validate_layer_outputs
+                entries = [(x, 'image') for x in validate_layer_outputs(result.get('data'))]
+            else:
+                entries = [(x,'image') for x in result.get('data',[]) if not x.get('error')]
         else:
             c = result.get('content',{})
             entries = [({'url':c['video_url'],'label':'video'},'video')] if c.get('video_url') else []
@@ -151,7 +160,9 @@ def download(submission):
             if plan['compiled'].get('operation') in ('text-to-image', 'image-to-image'):
                 require(fmt == plan['compiled']['parameters']['output_format'],
                         'Provider image format differs from confirmed format')
-            name = ('%02d-' % i) + entry.get('label','image') + '.' + fmt
+            is_layer = plan['compiled'].get('operation') == 'decompose-layers'
+            label = ('base' if entry['z_index'] == 0 else 'layer') if is_layer else entry.get('label', 'image')
+            name = ('%02d-' % i) + label + '.' + fmt
             path = output/name
             # 清单哈希与磁盘内容一致才跳过下载，不能仅凭文件名存在就假定完整。
             previous_entry = next((x for x in previous if Path(x['path']).resolve() == path.resolve()), None)
@@ -166,7 +177,10 @@ def download(submission):
                     download_url(url, tmp)
             else:
                 tmp = path
-            require(valid_media(tmp, kind, plan['compiled']['parameters'].get('size')),
+            expected_size = entry['size'] if is_layer else plan['compiled']['parameters'].get('size')
+            valid = (valid_media(tmp, kind, expected_size, require_alpha=entry['z_index'] > 0)
+                     if is_layer else valid_media(tmp, kind, expected_size))
+            require(valid,
                     'Downloaded content is not valid media; retained file for inspection')
             if kind == 'image':
                 with tmp.open('rb') as stream:
@@ -186,10 +200,87 @@ def download(submission):
                                    'billing_currency':get_provider(plan['compiled']['provider'])['currency'], 'actual_billed_amount':None,
                                    'note':'Original provider outputs preserved; actual paid amount is not returned by this API.'}
             write(record_path, record)
+        if plan['compiled'].get('operation') == 'decompose-layers':
+            from core.layers import position_metadata
+            metadata_path = output/'layers.json'
+            write(metadata_path, position_metadata(manifest))
+            record['result']['metadata'] = {'path': str(metadata_path), 'sha256': sha256_file(metadata_path)}
         state['download_complete'] = True
         write(record_path, record)
         return record['result']
 
 
+
+def deliver(submission, destination=None):
+    """Deliver verified media and optional layer metadata, never process files."""
+    from commands.status import status, status_result
+    record_path = submission_path(submission)
+    destination = Path(destination or Path.cwd()).resolve(strict=True)
+    require(destination.is_dir(), 'Delivery destination must be an existing directory')
+    require(destination != record_path.parent and record_path.parent not in destination.parents,
+            'Deliver to the user project directory, not the temporary task directory')
+    with lock(record_path.parent):
+        record = read(record_path)
+        record['execution']['delivery_complete'] = False
+        write(record_path, record)
+    checked = status_result(status(record_path))
+    require(checked['success'], checked['error'] or 'Generation not successful; cannot deliver')
+    _download(record_path)
+    with lock(record_path.parent):
+        record = read(record_path)
+        result = record['result']
+        require(record['execution'].get('download_complete') is True, 'Media retrieval is incomplete')
+        sources = [*result['files']]
+        if result.get('metadata'):
+            sources.append(result['metadata'])
+        for item in sources:
+            require(Path(item['path']).is_file() and sha256_file(item['path']) == item['sha256'],
+                    'Cached output changed; retry deliver')
+        previous = record.get('delivery')
+        directory = Path(previous['directory']) if previous else None
+        reusable = (directory is not None and directory.is_dir() and not directory.is_symlink()
+                    and directory.parent == destination
+                    and all((not (directory/Path(item['path']).name).exists()
+                             and not (directory/Path(item['path']).name).is_symlink())
+                            or ((directory/Path(item['path']).name).is_file()
+                                and not (directory/Path(item['path']).name).is_symlink()
+                                and sha256_file(directory/Path(item['path']).name) == item['sha256'])
+                            for item in sources))
+        if not reusable:
+            base = 'richmedia-' + record_path.parent.name + '-' + record_path.stem
+            counter = 0
+            while True:
+                directory = destination/(base + ('-' + str(counter) if counter else ''))
+                try:
+                    directory.mkdir(mode=0o700)
+                    break
+                except FileExistsError:
+                    counter += 1
+            if previous:
+                record.setdefault('delivery_history', []).append(previous)
+        delivered = {'directory': str(directory), 'files': [], 'delivered_at': now()}
+        record['delivery'] = delivered
+        write(record_path, record)
+        for item in sources:
+            target = directory/Path(item['path']).name
+            if not target.exists():
+                # Exclusive creation preserves user files, including during retries.
+                with open(item['path'], 'rb') as source, target.open('xb') as output:
+                    shutil.copyfileobj(source, output)
+                    output.flush()
+                    os.fsync(output.fileno())
+            require(sha256_file(target) == item['sha256'], 'Delivered file checksum mismatch')
+            final = {'path': str(target), 'sha256': item['sha256']}
+            if item is result.get('metadata'):
+                delivered['metadata'] = final
+            else:
+                final.update({k: item[k] for k in ('kind', 'provider', 'model') if k in item})
+                delivered['files'].append(final)
+            write(record_path, record)
+        record['execution']['delivery_complete'] = True
+        write(record_path, record)
+        return delivered
+
+
 def run(args):
-    return download(args.submission)
+    return deliver(args.submission)

@@ -16,7 +16,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from commands import submit as submit_command, status as status_command, download as download_command
+from commands import submit as submit_command, status as status_command, deliver as download_command
 from config_fixture import config_fixture
 from core import submission_store as store
 from cost_fixture import save_with_cost
@@ -296,16 +296,19 @@ class JobBehavior(unittest.TestCase):
     # 即使默认输出为 JPEG，透明图层仍保存 PNG；清单保留边界框、用量，并可重复读取。
     def test_layer_download_preserves_metadata_and_png(self):
         spec = {'provider':'volcengine','model':'seedream-5.0-pro','operation':'decompose-layers','assets':[asset('image')],
-                'parameters':{'output_format':'jpeg'}}
+                'parameters':{'output_format':'png'}}
         self.d.mkdir()
         store.write(self.d/'submit-001.json', {**spec,
                    'execution': {'state':'succeeded','compiled':compile_request(spec)},
                    'response': {'data':[{'b64_json':base64.b64encode(png()).decode(),
-                   'z_index':1,'bounding_box':{'absolute':[1,2,3,4]}}],'usage':{'total_tokens':22}}})
-        result = download_command.download(self.d)
+                   'z_index':0,'size':'400x400','output_format':'png'},
+                   {'b64_json':base64.b64encode(png()).decode(),'z_index':1,
+                    'size':'400x400','output_format':'png','name':'element','description':'element',
+                    'bounding_box':{'absolute':[1,2,3,4],'normalized':[2,5,7,10]}}],'usage':{'total_tokens':22}}})
+        result = download_command._download(self.d)
         self.assertTrue(result['files'][0]['path'].endswith('.png'))
-        self.assertEqual(result['files'][0]['origin']['bounding_box']['absolute'],[1,2,3,4])
-        self.assertEqual(download_command.download(self.d)['usage']['total_tokens'],22)
+        self.assertEqual(result['files'][1]['origin']['bounding_box']['absolute'],[1,2,3,4])
+        self.assertEqual(download_command._download(self.d)['usage']['total_tokens'],22)
 
     # 缺少真实批准文本时，提交不得创建 job.json，也不能留下已尝试状态。
     def test_missing_approval_does_not_create_attempt(self):
@@ -332,7 +335,7 @@ class JobBehavior(unittest.TestCase):
         store.write(self.d/'submit-001.json', {'execution':{'state':'succeeded','compiled':compiled},
                    'response':{'data':[{'b64_json':base64.b64encode(data).decode(),'output_format':'png'}],
                                'usage':{'total_tokens':88}}})
-        result = download_command.download(self.d)
+        result = download_command._download(self.d)
         self.assertEqual(Path(result['files'][0]['path']).read_bytes(),data)
         self.assertEqual(result['usage']['total_tokens'],88)
         self.assertIsNone(result['actual_billed_amount_cny'])

@@ -9,7 +9,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import status as status_command, download as download_command
+from commands import status as status_command, deliver as download_command
 from core import submission_store as store
 from cost_fixture import save_with_cost
 
@@ -130,8 +130,8 @@ class DownloadRetry(unittest.TestCase):
                        'execution': {'state':'succeeded','compiled':compile_request(spec)},
                        'response': {'data':[{'url':'https://example.com/result.png'}]}})
             with patch.object(download_command.urllib.request, 'urlopen', side_effect=[TimeoutError(), Response(data)]) as get, patch.object(status_command.time, 'sleep'):
-                result = download_command.download(job)
+                result = download_command._download(job)
                 self.assertEqual(Path(result['files'][0]['path']).read_bytes(), data)
                 self.assertTrue(store.read(job / 'submit-001.json')['execution']['download_complete'])
-                download_command.download(job)
+                download_command._download(job)
                 self.assertEqual(get.call_count, 2)

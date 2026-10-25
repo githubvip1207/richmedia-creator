@@ -10,11 +10,11 @@ from providers import PROVIDERS
 from commands import (init as init_command, models as models_command,
                       check as check_command, doctor as doctor_command,
                       estimate_cost as estimate_cost_command, submit as submit_command,
-                      status as status_command, download as download_command)
+                      status as status_command, deliver as deliver_command)
 
 COMMANDS = {'init': init_command, 'models': models_command, 'check': check_command,
             'doctor': doctor_command, 'estimate-cost': estimate_cost_command,
-            'submit': submit_command, 'status': status_command, 'download': download_command}
+            'submit': submit_command, 'status': status_command, 'deliver': deliver_command}
 
 
 # 将结果编码为可读 JSON，保留中文并拒绝 NaN/Infinity，方便 CLI 消费方稳定解析。
@@ -22,7 +22,7 @@ def emit(value):
     print(json.dumps(value,ensure_ascii=False,indent=2,allow_nan=False))
 
 
-# 注册检查、成本计算、提交、查询和下载命令。供应商取自用户所选任务配置。
+# 注册检查、成本计算、提交、查询和交付命令。供应商取自用户所选任务配置。
 def main():
     parser = argparse.ArgumentParser(description='富媒体生成器：estimate costs, confirm in chat, then submit once')
     subs = parser.add_subparsers(dest='command',required=True)
@@ -41,11 +41,11 @@ def main():
     sub.add_argument('--workdir',required=True,help='Existing task directory containing <provider>-priceing.json')
     sub.add_argument('--approval-text',required=True,help='Actual user reply, never generated consent')
     sub.add_argument('--accept-uncertain-cost',action='store_true')
-    # 已有任务入口：查询和下载不创建生成。
+    # 已有任务入口：查询和交付不创建生成。
     status = subs.add_parser('status')
     status.add_argument('--submission',required=True,help='Path to submit-NNN.json')
     status.add_argument('--wait',type=int,default=0,choices=range(601),metavar='0..600')
-    dl = subs.add_parser('download')
+    dl = subs.add_parser('deliver', help='Retrieve, validate and deliver final outputs into the current project directory')
     dl.add_argument('--submission',required=True,help='Path to submit-NNN.json')
     args = parser.parse_args()
     try:

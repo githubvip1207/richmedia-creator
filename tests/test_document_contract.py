@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from commands import submit as submit_command, download as download_command
+from commands import submit as submit_command, deliver as download_command
 from core import dependencies
 from core import submission_store as store
 from core.request import compile_request, ROOT
@@ -172,7 +172,7 @@ class DocumentContract(unittest.TestCase):
         record['result']={'files':[{'path':str(file),'sha256':download_command.sha256_file(file)}]}
         store.write(state['submission'],record)
         with patch.object(download_command, 'download_url') as get:
-            result=download_command.download(state['submission'])
+            result=download_command._download(state['submission'])
         get.assert_not_called()
         self.assertEqual(Path(result['files'][0]['path']).resolve(),file.resolve())
 
@@ -215,8 +215,9 @@ class DocumentContract(unittest.TestCase):
                 status=invoke(['status','--submission',submitted['submission']])
                 self.assertEqual(status,{'success':True,'error':None})
                 with patch.object(download_command, 'download_url',side_effect=lambda url,path:path.write_bytes(png())):
-                    downloaded=invoke(['download','--submission',submitted['submission']])
+                    with patch('commands.deliver.Path.cwd',return_value=self.work):
+                        downloaded=invoke(['deliver','--submission',submitted['submission']])
                 file=Path(downloaded['files'][0]['path'])
-                self.assertEqual(file.parent.name,'output-001')
+                self.assertEqual(file.parent.parent, self.work.resolve())
                 self.assertEqual(file.read_bytes(),png())
                 self.assertEqual(store.read(task/'payload.json'),spec)

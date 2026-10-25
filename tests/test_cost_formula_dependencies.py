@@ -20,6 +20,8 @@ class FormulaDependencies(unittest.TestCase):
     def measure(self, asset):
         source = asset['source']
         metadata = {'width':1280,'height':720} if asset['kind'] != 'audio' else {}
+        if asset['kind'] == 'image':
+            metadata['mime'] = 'image/png'
         if 'portrait' in source:
             metadata.update(width=720,height=1280)
         if 'arbitrary' in source:

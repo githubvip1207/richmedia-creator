@@ -4,7 +4,33 @@ import time
 from core.request import require
 from core.submission_store import read, write, lock, submission_path, now
 from providers import get_provider
-from providers.transport import ProviderError, sanitize_response
+from providers.transport import ProviderError, sanitize_response, response_error
+
+
+def image_response_state(result, compiled):
+    """Decide generation success from the saved synchronous image response."""
+    require(isinstance(result, dict), 'Image response must be an object')
+    if result.get('error'):
+        error = response_error(result['error'], secrets=(compiled.get('prompt', ''),)).details
+        return {'state': 'failed', 'usage': result.get('usage'), 'errors': [error]}
+    entries = result.get('data')
+    require(isinstance(entries, list) and bool(entries), 'Image response missing output data')
+    require(all(isinstance(x, dict) for x in entries), 'Invalid image result entry')
+    require(all(x.get('error') or isinstance(x.get('url'), str) and x['url'].startswith('https://')
+                or isinstance(x.get('b64_json'), str) and bool(x['b64_json']) for x in entries),
+            'Image result missing usable output')
+    outputs = [x for x in entries if not x.get('error')]
+    require(len(outputs) <= compiled['quantity'], 'Image output count differs from confirmed quantity')
+    errors = [response_error(x['error'], secrets=(compiled.get('prompt', ''),)).details
+              for x in entries if x.get('error')]
+    if compiled.get('operation') == 'decompose-layers':
+        if not errors:
+            from core.layers import validate_layer_outputs
+            validate_layer_outputs(outputs)
+        image_state = 'failed' if errors else 'succeeded'
+    else:
+        image_state = 'failed' if len(errors) == len(entries) else ('partial_failed' if errors else 'succeeded')
+    return {'state': image_state, 'usage': result.get('usage'), 'errors': errors}
 
 
 def status_result(state):
@@ -34,7 +60,21 @@ def status(submission, wait=0):
         record = read(path)
         state = record['execution']
         adapter = get_provider(state['compiled']['provider'])['adapter']
-        if state['compiled']['kind'] == 'image' or not state.get('task_id'):
+        if state['compiled']['kind'] == 'image':
+            # Recheck layer results against their complete response and geometry.
+            # Unknown/rejected submissions stay unresolved and are never resubmitted.
+            if (state['compiled'].get('operation') == 'decompose-layers'
+                    and state['state'] in ('succeeded', 'partial_failed', 'failed')):
+                try:
+                    state.update(image_response_state(record.get('response'), state['compiled']), error=None)
+                except ValueError as exc:
+                    state.update(state='submission_unknown', error=str(exc), download_complete=False, delivery_complete=False)
+                if state['state'] != 'succeeded':
+                    state['delivery_complete'] = False
+                state['updated_at'] = now()
+                write(path, record)
+            return state
+        if not state.get('task_id'):
             return state
         wait = min(max(wait, 0), 600)
         deadline = time.monotonic() + wait

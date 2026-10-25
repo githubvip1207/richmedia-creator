@@ -21,6 +21,49 @@ def sha256_file(path):
     return h.hexdigest()
 
 
+def image_mime(path):
+    """Identify supported local image containers from bytes, never the filename."""
+    with open(path, 'rb') as stream:
+        head = stream.read(4096)
+    signatures = ((b'\x89PNG\r\n\x1a\n', 'image/png'), (b'\xff\xd8\xff', 'image/jpeg'),
+                  (b'GIF87a', 'image/gif'), (b'GIF89a', 'image/gif'),
+                  (b'BM', 'image/bmp'), (b'II\x2a\x00', 'image/tiff'),
+                  (b'MM\x00\x2a', 'image/tiff'), (b'II\x2b\x00', 'image/tiff'),
+                  (b'MM\x00\x2b', 'image/tiff'))
+    for signature, mime in signatures:
+        if head.startswith(signature):
+            return mime
+    if head[:4] == b'RIFF' and head[8:12] == b'WEBP':
+        return 'image/webp'
+    if head[4:8] == b'ftyp':
+        box_size = int.from_bytes(head[:4], 'big')
+        if 16 <= box_size <= len(head):
+            brands = {head[8:12]} | {head[i:i+4] for i in range(16, box_size-3, 4)}
+            heic = {b'heic', b'heix', b'hevc', b'hevx', b'heim', b'heis', b'hevm', b'hevs'}
+            if not brands & {b'avif', b'avis'}:
+                if brands & heic:
+                    return 'image/heic'
+                if brands & {b'mif1', b'msf1'}:
+                    return 'image/heif'
+    raise ValueError('Unsupported input image format; file content must be a supported image')
+
+
+def validate_image_request_size(assets, template=None):
+    """Check JSON/data-URI size without allocating Base64 before submission."""
+    body = dict(template or {})
+    images, encoded_bytes = [], 0
+    for asset in assets:
+        metadata = asset.get('metadata', {})
+        if asset['source'].startswith('https://'):
+            images.append(asset['source'])
+        else:
+            images.append('data:' + metadata['mime'] + ';base64,')
+            encoded_bytes += 4 * ((metadata['bytes'] + 2) // 3)
+    body['image'] = images
+    if len(json.dumps(body, ensure_ascii=False).encode()) + encoded_bytes > 64*1024*1024:
+        raise ValueError('Request exceeds 64 MB after Base64 encoding; use approved HTTPS asset URLs')
+
+
 # 复制并检查素材字段，区分远程 HTTPS、供应商 asset:// 和本地文件三种输入路径。
 # 本地图片或音频补充 MIME、字节数、哈希及可获取的 ffprobe 信息；远程事实不自动补猜。
 def inspect_asset(asset):
@@ -59,7 +102,7 @@ def inspect_asset(asset):
     # 本地原始文件与后续计划绑定；记录字节数而不保存文件正文。
     a['sha256'] = sha256_file(path)
     a['metadata']['bytes'] = path.stat().st_size
-    mime = mimetypes.guess_type(str(path))[0]
+    mime = image_mime(path) if a['kind'] == 'image' else mimetypes.guess_type(str(path))[0]
     if not mime or not mime.startswith(a['kind'] + '/'):
         raise ValueError('Unrecognized asset MIME type')
     a['metadata']['mime'] = mime
@@ -92,7 +135,8 @@ def inspect_asset(asset):
 def materialize(asset):
     if asset['transport'] != 'local-base64':
         return asset['source']
-    if sha256_file(asset['source']) != asset['sha256']:
-        raise ValueError('Local asset changed after confirmation; update the task and reconfirm')
     with open(asset['source'], 'rb') as f:
-        return 'data:' + asset['metadata']['mime'] + ';base64,' + base64.b64encode(f.read()).decode('ascii')
+        data = f.read()
+    if hashlib.sha256(data).hexdigest() != asset['sha256']:
+        raise ValueError('Local asset changed after confirmation; update the task and reconfirm')
+    return 'data:' + asset['metadata']['mime'] + ';base64,' + base64.b64encode(data).decode('ascii')
