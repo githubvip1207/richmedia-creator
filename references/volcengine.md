@@ -377,7 +377,7 @@
        "tools": [{"type":"web_search"}], // 固定：开启联网搜索
        "watermark": false, // 固定：不加平台水印
        "return_last_frame": false, // 固定：不返回末帧
-       "service_tier": "default", // 固定：在线普通生成
+       "service_tier": "default", // 非 Mini 模型必需：在线普通生成；Seedance 2.0 Mini 必须省略此字段
        "output_format": "mp4" // 固定：MP4；2.0 系列固定输出 MP4，省略此字段
      }
    }
@@ -454,7 +454,7 @@
        "generate_audio": false, // 必需：默认无声；用户要求台词、旁白、音乐或音效时设为 true
        "watermark": false, // 固定：不加平台水印
        "return_last_frame": false, // 固定：不返回末帧
-       "service_tier": "default", // 固定：在线普通生成
+       "service_tier": "default", // 非 Mini 模型必需：在线普通生成；Seedance 2.0 Mini 必须省略此字段
        "output_format": "mp4" // 固定：MP4；2.0 系列固定输出 MP4，省略此字段
      }
    }

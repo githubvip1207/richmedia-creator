@@ -40,12 +40,12 @@ def compile_native_video(spec, measured_assets=None):
     require(isinstance(prompt, str) and bool(prompt.strip()), 'Video prompt is required')
     require(not re.search(r'--(?:rs|rt|dur|resolution|ratio|duration|frames|seed|cf|camerafixed|camera_fixed|wm|watermark)\b', prompt),
             'Inline API parameter flags are unsupported; resolve settings in payload before confirmation')
-    # Volcengine Mini text-to-video rejects service_tier, including default.
+    # Volcengine Mini text/keyframe video rejects service_tier, including default.
     omit_service_tier = (provider == 'volcengine' and alias == 'seedance-2.0-mini'
-                         and spec['operation'] == 'text-to-video')
+                         and spec['operation'] in ('text-to-video', 'image-to-video'))
     required_fields = ('resolution', 'ratio', 'duration', 'generate_audio', 'watermark', 'return_last_frame')
     if omit_service_tier:
-        require('service_tier' not in body, 'Volcengine Mini text-to-video must omit service_tier')
+        require('service_tier' not in body, 'Volcengine Mini video must omit service_tier')
     else:
         required_fields += ('service_tier',)
     for key in required_fields:

@@ -27,6 +27,8 @@ def request(provider='volcengine', model='seedance-2.5', mode=None):
                         'resolution': '480p', 'ratio': 'adaptive' if mode else '16:9',
                         'duration': 4, 'generate_audio': False, 'watermark': False,
                         'return_last_frame': False, 'service_tier': 'default'}}
+    if provider == 'volcengine' and model == 'seedance-2.0-mini':
+        spec['payload'].pop('service_tier')
     if model == 'seedance-2.5':
         spec['payload']['output_format'] = 'mp4'
     if mode:
@@ -73,6 +75,44 @@ class NativeVideo(unittest.TestCase):
                                          [] if not mode else ['first_frame'] if mode == 'first-frame' else ['first_frame', 'last_frame'])
                         self.assertEqual([x['image_url']['url'] for x in body['content'][1:]],
                                          [a['source'] for a in spec.get('assets', [])])
+
+    def test_volcengine_mini_omits_service_tier_in_submitted_text_and_keyframe_video(self):
+        for mode in (None, 'first-frame', 'first-last-frame'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                spec = request('volcengine', 'seedance-2.0-mini', mode)
+                prepare(work, spec)
+                with config_fixture({volcengine.KEY_ENV: 'fixture'}), \
+                        patch('commands.submit.require_dependencies'), \
+                        patch.object(volcengine, 'request', return_value={'id': 'mini-task'}) as post:
+                    state = submit.submit(work, spec, 'TEST CONFIRMATION ACCEPT UNKNOWN COST', accept_uncertain=True)
+                self.assertEqual(state['state'], 'queued')
+                post.assert_called_once()
+                self.assertNotIn('service_tier', post.call_args.args[2])
+                expected_roles = ([] if mode is None else ['first_frame'] if mode == 'first-frame'
+                                  else ['first_frame', 'last_frame'])
+                self.assertEqual([item['role'] for item in post.call_args.args[2]['content'][1:]], expected_roles)
+                for value in ('default', 'flex', None):
+                    invalid = copy.deepcopy(spec)
+                    invalid['payload']['service_tier'] = value
+                    with self.subTest(service_tier=value), self.assertRaisesRegex(ValueError, 'must omit service_tier'):
+                        compile_request(invalid)
+
+    def test_other_video_models_and_byteplus_keep_service_tier(self):
+        for provider in ('volcengine', 'byteplus'):
+            for model in ('seedance-2.5', 'seedance-2.0', 'seedance-2.0-fast', 'seedance-2.0-mini'):
+                if provider == 'volcengine' and model == 'seedance-2.0-mini':
+                    continue
+                for mode in (None, 'first-frame', 'first-last-frame'):
+                    with self.subTest(provider=provider, model=model, mode=mode):
+                        spec = request(provider, model, mode)
+                        assets = [{**{k: v for k, v in a.items() if k != 'metadata'}, **a['metadata']}
+                                  for a in measured(spec)]
+                        compiled = compile_request(spec, assets)
+                        self.assertEqual(payload({'compiled': compiled})['service_tier'], 'default')
+                        spec['payload'].pop('service_tier')
+                        with self.assertRaisesRegex(ValueError, 'service_tier is required'):
+                            compile_request(spec, assets)
 
     def test_constraints_reject_wrong_models_fields_and_parameter_types(self):
         for changes in ({'duration': True}, {'duration': 3}, {'duration': 31}, {'resolution': '4k'},
