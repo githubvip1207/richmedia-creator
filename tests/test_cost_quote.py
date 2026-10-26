@@ -47,10 +47,9 @@ class IndependentCosts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'expired'):
             consume_quote(as_native(image()),quote)
 
-    def test_video_formula_and_missing_floor(self):
+    def test_text_video_formula_uses_duration_and_output_pixel_area(self):
         spec = {'provider': 'volcengine', 'model': 'seedance-2.5', 'operation': 'text-to-video',
-                'prompt': 'A panda rolls', 'parameters': {'ratio': '16:9', 'duration': 4},
-                'optimizer': {'skill': 'sd25-pe', 'status': 'applied'}}
+                'prompt': 'A panda rolls', 'parameters': {'ratio': '16:9', 'duration': 4}}
         quote = calculate(spec)
         import math
         expected = math.ceil(4*854*480*24/1024)

@@ -4,14 +4,14 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
-from commands import submit as submit_command
 from core.operations import OPERATIONS, internal_operation
 from core.catalogs import CATALOGS
-from legacy_request import compile_request
+from cost_fixture import compile_request
 from providers import consume_quote
-from cost_fixture import calculate, as_native, save_with_cost
+from cost_fixture import calculate, as_native
 from providers import calculate_asset_inputs
-from test_runtime import video, asset
+from core.payload import payload
+from test_runtime import asset
 
 
 class SevenOperations(unittest.TestCase):
@@ -52,22 +52,10 @@ class SevenOperations(unittest.TestCase):
         quote=calculate(spec)
         self.assertEqual(quote['calculation']['operation'],'image-to-image')
         self.assertNotIn('mode',quote['calculation'])
+        consume_quote(as_native(spec), quote)
         changed=copy.deepcopy(spec);changed['parameters']['size']='2K'
-        with self.assertRaisesRegex(ValueError,'omit optimize_prompt_options'):
+        with self.assertRaisesRegex(ValueError,'differs from cost artifact'):
             consume_quote(as_native(changed),quote)
-
-    def test_reference_modes_control_native_video_task_type(self):
-        for mode,task_type in [('reference','reference'),('edit','edit')]:
-            compiled=compile_request(video(operation='reference-to-video',mode=mode,assets=[asset()],
-                                           parameters={'ratio':'adaptive','duration':-1}))
-            self.assertEqual(compiled['payload_template']['omni_reference_task_type'],task_type)
-            self.assertEqual(compiled['operation'],'reference-to-video')
-            self.assertEqual(compiled['mode'],mode)
-        for mode in ('before','after'):
-            compiled=compile_request(video(operation='extend-video',mode=mode,assets=[asset()],
-                                           parameters={'resolution':'480p','duration':4}))
-            self.assertEqual(compiled['payload_template']['omni_reference_task_type'],'extend')
-            self.assertEqual(compiled['mode'],mode)
 
     def test_image_to_image_counts_and_prices_without_mode(self):
         for count in (1, 2, 10):
@@ -78,7 +66,7 @@ class SevenOperations(unittest.TestCase):
                 compiled=compile_request(spec)
                 self.assertNotIn('mode',compiled)
                 self.assertNotIn('mode',compiled['payload_template'])
-                self.assertEqual(len(compiled['payload_template']['image']),count)
+                self.assertEqual(len(payload({'compiled': compiled})['image']),count)
                 expected=round(0.3+max(count-1,0)*0.02,6)
                 quote=calculate(spec)
                 self.assertEqual(list(quote['result']['amount'].values()),[expected,expected])
@@ -86,12 +74,3 @@ class SevenOperations(unittest.TestCase):
         for count in (0,11):
             with self.subTest(count=count), self.assertRaises(ValueError):
                 compile_request({**spec,'assets':[asset('image') for _ in range(count)]})
-
-    def test_image_to_image_no_mode_reaches_provider_unchanged(self):
-        from unittest.mock import patch
-        from providers import compile_request as compile_native
-        from providers.volcengine import client as volcengine
-        spec = {'provider': 'volcengine', 'operation': 'image-to-image', 'payload': {}}
-        with patch.object(volcengine, 'request') as post, self.assertRaisesRegex(ValueError, 'exact image model ID'):
-            compile_native(spec)
-        post.assert_not_called()

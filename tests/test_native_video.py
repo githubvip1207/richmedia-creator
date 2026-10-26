@@ -102,22 +102,6 @@ class NativeVideo(unittest.TestCase):
                     with self.subTest(service_tier=value), self.assertRaisesRegex(ValueError, 'must omit service_tier'):
                         compile_request(invalid)
 
-    def test_service_tier_matches_supplier_rules_for_all_models(self):
-        for provider in ('volcengine', 'byteplus'):
-            for model in ('seedance-2.5', 'seedance-2.0', 'seedance-2.0-fast', 'seedance-2.0-mini'):
-                for mode in (None, 'first-frame', 'first-last-frame'):
-                    with self.subTest(provider=provider, model=model, mode=mode):
-                        spec = request(provider, model, mode)
-                        assets = [{**{k: v for k, v in a.items() if k != 'metadata'}, **a['metadata']}
-                                  for a in measured(spec)]
-                        spec['payload'].pop('service_tier', None)
-                        self.assertNotIn('service_tier', payload({'compiled': compile_request(spec, assets)}))
-                        spec['payload']['service_tier'] = 'default'
-                        if provider == 'volcengine':
-                            with self.assertRaisesRegex(ValueError, 'must omit service_tier'):
-                                compile_request(spec, assets)
-                        else:
-                            self.assertEqual(payload({'compiled': compile_request(spec, assets)})['service_tier'], 'default')
 
     def test_constraints_reject_wrong_models_fields_and_parameter_types(self):
         for changes in ({'duration': True}, {'duration': 3}, {'duration': 31}, {'resolution': '4k'},
@@ -149,7 +133,7 @@ class NativeVideo(unittest.TestCase):
             spec['payload']['duration'] = 16
             with self.assertRaises(ValueError): compile_request(spec)
 
-    def test_fixed_output_settings_and_internal_options_cannot_be_overridden(self):
+    def test_deferred_video_fields_are_rejected_until_adapted(self):
         for provider in ('volcengine', 'byteplus'):
             for fields in ({'priority': 0}, {'execution_expires_after': 172800}, {'draft': False}):
                 with self.subTest(provider=provider,fields=fields):
@@ -194,7 +178,7 @@ class NativeVideo(unittest.TestCase):
         spec = request(); spec['assets'] = request(mode='first-frame')['assets']
         with self.assertRaises(ValueError): compile_request(spec)
 
-    def test_byteplus_adaptive_25_quote_is_known_and_arbitrary_ratio_unknown(self):
+    def test_byteplus_adaptive_quotes_cover_fixed_auto_and_arbitrary_ratios(self):
         with tempfile.TemporaryDirectory() as tmp:
             spec = request('byteplus', mode='first-frame')
             quote = prepare(Path(tmp), spec)

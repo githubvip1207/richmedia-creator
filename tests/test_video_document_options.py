@@ -1,7 +1,6 @@
 """视频文档参数的请求、确认绑定和尾帧交付回归；供应商调用全部模拟。"""
 
 import copy
-import json
 import sys
 import tempfile
 import unittest
@@ -119,7 +118,7 @@ class VideoDocumentOptions(unittest.TestCase):
                         self.assertEqual(post.call_args.args[1][key], value)
                         post.assert_called_once()
 
-    def test_mov_and_requested_jpeg_tail_are_delivered_without_new_generation(self):
+    def test_mocked_mov_and_jpeg_tail_delivery_preserves_formats_without_network(self):
         for provider in ('volcengine', 'byteplus'):
             with self.subTest(provider=provider), tempfile.TemporaryDirectory() as tmp:
                 work = Path(tmp) / 'task'

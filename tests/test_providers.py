@@ -1,35 +1,30 @@
 # 供应商隔离测试：覆盖密钥、模型 ID、独立币种、离线报价及唯一供应商提交。
 # 示例密钥和汇率仅是本地测试数据，不能用于真实请求或实际报价。
 """验证供应商隔离、原币计费、离线比价及选定供应商后的唯一提交。"""
-import copy
 import datetime as dt
 import io
-import json
-import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command, status as status_command
 from providers.byteplus import client as byteplus
 from providers.volcengine import client as volcengine
-from providers import configured
 from config_fixture import config_fixture
 from core import submission_store as store
 from cost_fixture import save_with_cost
 from core.catalogs import CATALOGS, ROOT
-from legacy_request import compile_request
+from cost_fixture import compile_request
 from providers import estimate
 
 
-# 构造 BytePlus 视频请求夹具，使用逻辑模型别名和测试优化记录，可用 extra 覆盖场景。
+# 构造 BytePlus 视频场景夹具，使用逻辑模型别名，可用 extra 覆盖场景。
 def request(provider='byteplus', **extra):
     s = {'provider':provider,'model':'seedance-2.5','operation':'text-to-video','prompt':'一只熊猫在草坡上打滚。',
-         'optimizer':{'skill':'sd25-pe','status':'applied'},'parameters':{'ratio':'16:9','duration':5}}
+         'parameters':{'ratio':'16:9','duration':5}}
     s.update(extra)
     return s
 
@@ -92,7 +87,7 @@ class SupplierBehavior(unittest.TestCase):
             estimate(compile_request(request()),pricing=store.read(ROOT/'models/volcengine-pricing.json'))
 
     # 验证参考视频按输入加输出时长计 Token，并使用 BytePlus 有视频美元费率。
-    # 未独立验证最低计费门槛时，金额上界必须保持未知。
+    # 最低计费门槛的依据与估算范围须保留，不能描述为实付账单。
     def test_usd_reference_rate_includes_input_duration(self):
         a={'kind':'video','source':'https://example.com/ref.mp4','purpose':'动作参考','metadata':{'duration':10}}
         c=compile_request(request(operation='reference-to-video', mode='reference',assets=[a],parameters={'ratio':'16:9','duration':10,'resolution':'720p'}))
@@ -103,12 +98,12 @@ class SupplierBehavior(unittest.TestCase):
         self.assertGreaterEqual(e['amount'][1], e['amount'][0])
         self.assertTrue(e['minimum_tokens_evidence'])
 
-    # 将国内素材 ID 用于 BytePlus 时，provenance.provider 不匹配应直接拒绝。
-    def test_supplier_scoped_asset_id(self):
+    # 当前原生输入不接受 asset://，不能沿用旧版的账户来源声明来绕过。
+    def test_asset_ids_are_rejected_by_native_video_input(self):
         a={'kind':'image','source':'asset://test-asset','purpose':'角色参考','role':'first_frame',
            'provenance':{'provider':'volcengine'}}
-        with self.assertRaisesRegex(ValueError,'supplier/account scoped'):
-            compile_request(request(operation='image-to-video', assets=[a]))
+        with self.assertRaisesRegex(ValueError,'not asset IDs'):
+            compile_request(request(operation='image-to-video', assets=[a], parameters={'ratio': 'adaptive'}))
 
 
 def selected_request(provider='byteplus'):

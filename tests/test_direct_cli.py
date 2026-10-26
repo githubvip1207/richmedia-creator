@@ -1,6 +1,5 @@
 """命令行直接提交使用已保存报价，不依赖准备流程或确认哈希。"""
 import importlib.util
-import json
 import subprocess
 import sys
 import tempfile
@@ -12,7 +11,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command, status as status_command
 from core import submission_store as store
 from core.catalogs import ROOT
-from cost_fixture import calculate, save_with_cost
+from cost_fixture import save_with_cost
 from providers.volcengine import client as volcengine
 from config_fixture import config_fixture
 
@@ -28,7 +27,7 @@ class DirectCLI(unittest.TestCase):
         self.spec = save_with_cost(self.spec, self.work)
         store.write(self.work/'task-spec.json',self.spec)
 
-    def test_cli_submits_and_downloads_without_plan(self):
+    def test_cli_submits_and_checks_saved_status_without_plan(self):
         module_spec=importlib.util.spec_from_file_location('direct_cli',ROOT/'scripts/main.py')
         cli=importlib.util.module_from_spec(module_spec);module_spec.loader.exec_module(cli)
         with config_fixture({'VOLCENGINE_API_KEY':'fixture-only'}), \

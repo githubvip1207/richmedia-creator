@@ -82,7 +82,7 @@ class CostAudit(unittest.TestCase):
                          dict(zip(('min', 'max'), [round(v / c['fx']['usd_cny'], 6) for v in amounts])))
         self.assertEqual(c['steps'][-1]['value'], result['conversion'])
 
-    def test_unverified_floor_retains_raw_tokens_but_unknown_upper_cost(self):
+    def test_public_example_floor_records_evidence_and_estimated_bounds(self):
         record = self.quote({'provider': 'volcengine', 'model': 'seedance-2.5',
                              'operation': 'reference-to-video', 'mode': 'reference',
                              'resolution': '480p', 'ratio': '16:9', 'duration': 4,

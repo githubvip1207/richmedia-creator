@@ -267,7 +267,7 @@ class ReferenceVideo(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'changed after'): consume_quote(spec, quote)
             with self.assertRaisesRegex(ValueError, 'changed after'): payload({'compiled': compiled})
 
-    def test_documented_examples_compile_for_their_supplier_and_mode(self):
+    def test_supported_fields_of_documented_examples_compile_for_supplier_and_mode(self):
         for provider in ('volcengine', 'byteplus'):
             for operation in ('reference-to-video', 'extend-video'):
                 with self.subTest(provider=provider, operation=operation):

@@ -7,9 +7,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command, status as status_command, deliver as download_command
 from core import submission_store as store
-from cost_fixture import calculate, save_with_cost
+from cost_fixture import save_with_cost
 from providers.volcengine import client as volcengine
-from config_fixture import config_fixture
 from test_runtime import video
 
 
@@ -18,13 +17,13 @@ class SubmissionRecord(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.work = Path(self.tmp.name)
-        legacy = video()
-        from legacy_request import compile_request
-        self.spec = save_with_cost(legacy, self.work)
+        spec = video()
+        from cost_fixture import compile_request
+        self.spec = save_with_cost(spec, self.work)
         self.record = self.work/'submit-001.json'
         store.write(self.record, {**self.spec, 'response': {'id': 'task-fixture'},
                                  'execution': {'state': 'queued', 'task_id': 'task-fixture',
-                                               'compiled': compile_request(legacy)}})
+                                               'compiled': compile_request(spec)}})
 
     def test_polling_keeps_post_response_and_each_get_then_downloads_from_record(self):
         running = {'id':'task-fixture','status':'running'}

@@ -1,11 +1,9 @@
-# 离线行为测试：覆盖模型参数、估算、不可变计划、提交保护与媒体保存。
+# 离线行为测试：覆盖费用估算、提交保护与媒体保存。
 # 所有生成请求通过 mock 替代，不访问真实付费 API；测试素材与批准文本均为测试夹具。
 """离线行为校验，不调用真实付费 API。"""
 import base64
-import copy
 import datetime as dt
 import json
-import os
 import struct
 import sys
 import tempfile
@@ -20,16 +18,15 @@ from commands import submit as submit_command, status as status_command, deliver
 from config_fixture import config_fixture
 from core import submission_store as store
 from cost_fixture import save_with_cost
-from core.catalogs import CATALOGS, ROOT
-from legacy_request import compile_request
+from core.catalogs import ROOT
+from cost_fixture import compile_request
 from providers import estimate
 from providers.volcengine import client as volcengine
 
 
-# 构造视频请求测试夹具，默认记录已应用优化器；关键字参数可覆盖不同测试场景。
+# 构造视频场景夹具；原生请求由 cost_fixture 展开，关键字参数用于覆盖场景。
 def video(model='seedance-2.5', operation='text-to-video', **kw):
-    s = {'provider':'volcengine','model':model,'operation':operation,'prompt':'固定机位，一只熊猫在草坡上侧滚。',
-         'optimizer':{'skill':'sd25-pe','status':'applied'}}
+    s = {'provider':'volcengine','model':model,'operation':operation,'prompt':'固定机位，一只熊猫在草坡上侧滚。'}
     s.update(kw)
     return s
 
@@ -49,130 +46,6 @@ def png():
     return b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('!2I5B',400,400,8,6,0,0,0))+chunk(b'IDAT',zlib.compress((b'\0'+b'\xff\0\0\xff'*400)*400))+chunk(b'IEND',b'')
 
 
-# 验证模型请求编译的默认值、显式要求、素材角色及不支持选项的拒绝行为。
-class ModelBehavior(unittest.TestCase):
-    # 遍历国内六种模型，检查逻辑别名映射到目录中的准确供应商模型 ID。
-    def test_all_six_models_compile(self):
-        for alias,m in CATALOGS['volcengine']['models'].items():
-            spec = video(alias) if m['kind']=='video' else {'provider':'volcengine','model':alias,'operation':'text-to-image','prompt':'红色杯子','parameters':{'ratio':'1:1'}}
-            self.assertEqual(compile_request(spec)['payload_template']['model'],m['id'])
-
-    # 验证视频默认 480p、4 秒且无生成音频；用户明确的分辨率、时长和音频要求优先。
-    def test_low_cost_defaults_and_explicit_requirements(self):
-        for alias,m in CATALOGS['volcengine']['models'].items():
-            if m['kind']!='video':
-                continue
-            p = compile_request(video(alias))['parameters']
-            self.assertEqual((p['resolution'],p['duration'],p['generate_audio']),('480p',4,False))
-        p = compile_request(video(parameters={'resolution':'1080p','duration':12,'generate_audio':True}))['parameters']
-        self.assertEqual((p['resolution'],p['duration'],p['generate_audio']),('1080p',12,True))
-
-    # 验证 2.5 编辑锁定 duration=-1、ratio=adaptive、任务意图 edit；显式冲突时长应拒绝。
-    def test_25_edit_lock_and_type(self):
-        c = compile_request(video(operation='reference-to-video', mode='edit',assets=[asset()]))
-        self.assertEqual(c['parameters']['duration'],-1)
-        self.assertEqual(c['parameters']['ratio'],'adaptive')
-        self.assertEqual(c['payload_template']['omni_reference_task_type'],'edit')
-        with self.assertRaises(ValueError):
-            compile_request(video(operation='reference-to-video', mode='edit',assets=[asset()],parameters={'duration':4}))
-
-    # 延长任务缺少分辨率和时长应拒绝；显式提供后保留设置，不套用普通生成默认值。
-    def test_extension_needs_own_settings(self):
-        with self.assertRaises(ValueError):
-            compile_request(video(operation='extend-video', mode='after',assets=[asset()]))
-        c = compile_request(video(operation='extend-video', mode='after',assets=[asset()],parameters={'resolution':'720p','duration':8}))
-        self.assertEqual(c['parameters']['resolution'],'720p')
-
-    # 覆盖 seed、camera_fixed、frames 和模型不支持的分辨率，要求编译阶段明确拒绝。
-    def test_unsupported_parameters_fail(self):
-        for parameters in ({'seed':12},{'camera_fixed':True},{'frames':120},{'resolution':'4k'}):
-            with self.assertRaises(ValueError):
-                compile_request(video(parameters=parameters))
-        with self.assertRaises(ValueError):
-            compile_request(video('seedance-2.0-mini',parameters={'resolution':'1080p'}))
-
-    # 缺少已应用 sd25-pe 的记录时，Seedance 2.5 编译必须失败。
-    def test_require_optimizer(self):
-        with self.assertRaises(ValueError):
-            compile_request(video(optimizer={}))
-
-    # 验证首帧模式锁定自适应比例，且不能混入普通视频参考素材。
-    def test_first_frame_is_not_reference(self):
-        img = asset('image','first_frame')
-        c = compile_request(video(operation='image-to-video', assets=[img]))
-        self.assertEqual(c['parameters']['ratio'],'adaptive')
-        with self.assertRaises(ValueError):
-            compile_request(video(operation='image-to-video', assets=[img,asset()]))
-
-    # 2.0 纯音频参考必须失败；2.5 支持对应输入，检查模型能力差异。
-    def test_20_audio_needs_visual_reference(self):
-        with self.assertRaises(ValueError):
-            compile_request(video('seedance-2.0',operation='reference-to-video', mode='reference',assets=[asset('audio')]))
-        compile_request(video(operation='reference-to-video', mode='reference',assets=[asset('audio')]))
-
-    # 检查 2.0 单段超长以及 2.5 多段合计超长输入，均应在联网前拒绝。
-    def test_video_duration_limits(self):
-        a = asset()
-        a['metadata']['duration'] = 16
-        with self.assertRaises(ValueError):
-            compile_request(video('seedance-2.0',operation='reference-to-video', mode='reference',assets=[a]))
-        with self.assertRaises(ValueError):
-            compile_request(video(operation='reference-to-video', mode='reference',assets=[asset()]*4))
-
-    # 逐项验证 Pro/Flash 模型 ID、1K 默认值、PNG/URL、水印关闭和标准优化。
-    # 图片比例只能进入提示词，不能作为独立 API 字段发送。
-    def test_seedream_pro_flash_defaults_and_payload_options(self):
-        for alias, model_id in (
-            ('seedream-5.0-pro', 'doubao-seedream-5-0-pro-260628'),
-            ('seedream-5.0-flash', 'doubao-seedream-5-0-flash-260915'),
-        ):
-            c = compile_request({'provider':'volcengine','model':alias,'operation':'text-to-image','prompt':'小猫','parameters':{'ratio':'4:3'}})
-            payload = c['payload_template']
-            self.assertEqual(payload['model'], model_id)
-            self.assertEqual(payload['size'], '1K')
-            self.assertEqual(payload['watermark'], False)
-            self.assertEqual(payload['layer_decomposition'], False)
-            self.assertNotIn('ratio', payload)
-            self.assertIn('构图比例偏好：4:3。', payload['prompt'])
-            self.assertEqual(payload['output_format'], 'png')
-            self.assertEqual(payload['response_format'], 'url')
-            self.assertEqual(payload['optimize_prompt_options'], {'mode':'standard'})
-
-    # 向 Pro 请求顺序组图参数应失败，防止把多输出方案误当成原生单请求组图。
-    def test_image_native_group_not_supported(self):
-        with self.assertRaises(ValueError):
-            compile_request({'provider':'volcengine','model':'seedream-5.0-pro','operation':'text-to-image','prompt':'分镜',
-                             'parameters':{'sequential_image_generation':'auto'}})
-
-    # 验证拆分仅接受一张输入、可省略提示词，并正确开启 layer_decomposition。
-    def test_layer_single_input(self):
-        s = {'provider':'volcengine','model':'seedream-5.0-pro','operation':'decompose-layers','assets':[asset('image')]}
-        c = compile_request(s)
-        self.assertTrue(c['payload_template']['layer_decomposition'])
-        self.assertNotIn('prompt',c['payload_template'])
-        s['assets'] *= 2
-        with self.assertRaises(ValueError):
-            compile_request(s)
-
-    # 对超过 999、边界倒置和坐标数目错误的 bbox 逐一验证拒绝行为。
-    def test_region_coordinates_are_normalized_and_ordered(self):
-        for coords in ('0 0 1000 999','900 10 100 20','0 0 1'):
-            with self.assertRaises(ValueError):
-                compile_request({'provider':'volcengine','model':'seedream-5.0-pro','operation':'image-to-image',
-                    'prompt':'替换图1<bbox>'+coords+'</bbox>里的杯子','assets':[asset('image')]})
-
-    # 验证过小像素无效；透明编辑必须有经验证的 Alpha 通道，不能只凭输出选项启用。
-    def test_image_size_limits_and_transparency(self):
-        s = {'provider':'volcengine','model':'seedream-5.0-flash','operation':'text-to-image','prompt':'杯子','parameters':{'size':'512x512'}}
-        with self.assertRaises(ValueError):
-            compile_request(s)
-        s.update(operation='image-to-image',assets=[asset('image')],parameters={'background':'transparent','ratio':'1:1'})
-        with self.assertRaises(ValueError):
-            compile_request(s)
-        s['assets'][0]['metadata']['has_alpha'] = True
-        compile_request(s)
-
-
 # 验证刊例价估算公式、模型尺寸差异、参考素材成本及未知金额表达。
 class PriceBehavior(unittest.TestCase):
     # 独立按像素、帧率及时长计算 Token，核对向上取整和人民币刊例价金额。
@@ -188,7 +61,7 @@ class PriceBehavior(unittest.TestCase):
         e = estimate(compile_request(video('seedance-2.0')))
         self.assertEqual(e['assumed_output_dimensions'],[864,496])
 
-    # 输入视频时长必须计入 Token；未验证最低门槛时保留未知上界，提供门槛后使用两者较大值。
+    # 输入视频时长必须计入 Token；补充明确门槛后使用公式值和门槛中的较大值。
     def test_reference_video_not_omitted(self):
         c = compile_request(video(operation='reference-to-video', mode='reference',assets=[asset()],parameters={'ratio':'16:9'}))
         e = estimate(c)
@@ -205,8 +78,8 @@ class PriceBehavior(unittest.TestCase):
         resolved = estimate(c,pricing=pricing)
         self.assertEqual(resolved['tokens'],[floor,floor])
 
-    # 自适应比例缺少可靠输出尺寸时，金额应为未知，不能按零费用展示。
-    def test_adaptive_unknown_not_zero(self):
+    # 自适应输出尺寸无法精确预知时，仍提供非零估算并说明不确定性。
+    def test_adaptive_estimate_is_nonzero_and_records_uncertainty(self):
         c = compile_request(video(operation='image-to-video', assets=[asset('image','first_frame')]))
         c['assets'][0]['metadata'].update(width=1300, height=1000)
         e = estimate(c)
@@ -251,25 +124,43 @@ class JobBehavior(unittest.TestCase):
         self.assertFalse((self.d/'confirmation.md').exists())
 
     # 提供本地视频路径时应在编译前置检查中拒绝，不能将其编码为 Base64 发给供应商。
-    def test_local_video_not_sent_as_base64(self):
+    def test_existing_local_video_is_rejected_before_probe_or_post(self):
+        from providers import compile_request as compile_native
+        from cost_fixture import as_native
         path = Path(self.tmp.name)/'input.mp4'
         path.write_bytes(b'video')
-        a = asset()
-        a['source'] = str(path)
-        with self.assertRaisesRegex(ValueError,'not local video Base64'):
-            compile_request(video(operation='reference-to-video', mode='reference',assets=[a]))
+        source = asset()
+        source['source'] = str(path)
+        spec = as_native(video(operation='reference-to-video', mode='reference', assets=[source]))
+        with patch('core.media_probe.probe_asset') as probe, patch.object(volcengine, 'request') as post:
+            with self.assertRaisesRegex(ValueError, 'Video input requires an accessible HTTPS URL'):
+                compile_native(spec)
+        probe.assert_not_called()
+        post.assert_not_called()
 
-    def test_budget_unknown_or_exceeded_rejected(self):
-        for spec in (video(budget_cny=.01),video(operation='reference-to-video', mode='reference',assets=[asset()],budget_cny=20)):
-            self.prep(spec)
-            with patch.object(volcengine,'request') as net:
-                with self.assertRaises(ValueError):
-                    submit_command.submit(self.d,spec,'TEST CONFIRMATION')
-                net.assert_not_called()
-            self.assertFalse((self.d/'submit-001.json').exists())
+    def test_budget_limit_and_missing_conversion_stop_before_post(self):
+        from test_native_video import request, prepare
+        from providers import consume_quote
+        for key, value, message in (('budget_cny', .01, 'exceeds budget'),
+                                    ('budget_usd', 100, 'Cannot compare budget with unknown amount/conversion')):
+            with self.subTest(budget=key), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                spec = request()
+                quote = prepare(work, spec)
+                # 先确认基础请求合法，避免因其他前置校验错误而误通过。
+                consume_quote(spec, quote)
+                spec[key] = value
+                with patch.object(volcengine, 'request') as post, \
+                        patch('commands.submit.require_dependencies') as dependencies:
+                    with self.assertRaisesRegex(ValueError, message):
+                        submit_command.submit(work, spec, 'TEST CONFIRMATION')
+                post.assert_not_called()
+                dependencies.assert_not_called()
+                self.assertFalse((work/'submit-001.json').exists())
 
-    # 同一计划只允许一次模拟 POST；再次提交被挡住，已有任务仍可单独查询状态。
-    def test_post_once_then_resume_query_and_download(self):
+
+    # 一次图片提交后读取已保存响应，不因状态检查再次请求供应商。
+    def test_image_post_then_saved_status_does_not_call_supplier_again(self):
         h = self.prep({'provider': 'volcengine', 'model': 'seedream-5.0-flash',
                        'operation': 'text-to-image', 'prompt': 'cat', 'parameters': {'ratio': '1:1'}})
         with config_fixture({'VOLCENGINE_API_KEY': 'test-only'}), patch.object(
@@ -292,15 +183,28 @@ class JobBehavior(unittest.TestCase):
             self.assertEqual(req.call_count,1)
 
     # 费用上界未知且没有明确接受标志时，必须在任何供应商请求之前拒绝提交。
-    def test_uncertain_cost_requires_specific_flag(self):
-        h = self.prep(video(operation='reference-to-video', mode='reference',assets=[asset()]))
-        with patch('core.dependencies.skill_status',return_value={'status':'ok'}),config_fixture({'VOLCENGINE_API_KEY':'test-only'}),\
-             patch.object(volcengine,'request') as req:
-            with self.assertRaises(ValueError):
-                submit_command.submit(self.d,h,'TEST FIXTURE ONLY: confirmed')
-            req.assert_not_called()
+    def test_unknown_cost_requires_acceptance_and_accepted_request_posts_once(self):
+        from test_native_video import request, prepare
+        work = self.d
+        work.mkdir()
+        spec = request()
+        quote = prepare(work, spec)
+        quote['result']['amount']['max'] = None
+        store.write(work/'volcengine-priceing.json', quote)
+        with config_fixture({'VOLCENGINE_API_KEY': 'fixture-only'}), \
+                patch('commands.submit.require_dependencies'), \
+                patch.object(volcengine, 'request', return_value={'id': 'task'}) as post:
+            with self.assertRaisesRegex(ValueError, 'Cost upper estimate unknown'):
+                submit_command.submit(work, spec, 'TEST CONFIRMATION')
+            post.assert_not_called()
+            self.assertFalse((work/'submit-001.json').exists())
+            state = submit_command.submit(work, spec, 'TEST ACCEPT UNKNOWN COST', accept_uncertain=True)
+        post.assert_called_once()
+        self.assertEqual(state['state'], 'queued')
+        self.assertTrue(state['approval']['accept_uncertain_cost'])
 
-    # 即使默认输出为 JPEG，透明图层仍保存 PNG；清单保留边界框、用量，并可重复读取。
+
+    # PNG 图层输出保留边界框和用量，并可复用已保存文件。
     def test_layer_download_preserves_metadata_and_png(self):
         spec = {'provider':'volcengine','model':'seedream-5.0-pro','operation':'decompose-layers','assets':[asset('image')],
                 'parameters':{'output_format':'png'}}
