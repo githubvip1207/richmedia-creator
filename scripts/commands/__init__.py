@@ -98,7 +98,6 @@ EstimateContext（JSON 字段模板；按能力选用）
 ```jsonc
 {
   "output_dimensions": [854, 480], // [integer, integer]?；有依据的输出像素 [宽, 高]，须与所选规格相容。
-  "target_asset_index": 0, // integer?；编辑/延长的目标在完整 assets 数组中的下标，从 0 开始。
   "preferred_duration": 10 // number?；自动时长中期望的秒数；仅标记费用情景，不改 API 参数。
 }
 ```

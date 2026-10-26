@@ -20,6 +20,8 @@ def billing_inputs(compiled):
             a["metadata"]["duration"] for a in compiled["assets"] if a["kind"] == "audio"
         ],
     }
+    if "target_asset_id" in compiled:
+        result["target_asset_id"] = compiled["target_asset_id"]
     if compiled.get("mode") is not None:
         result["mode"] = compiled["mode"]
     if compiled["kind"] == "image":
@@ -64,6 +66,7 @@ def consume_quote(spec, quote, compiler, currency):
     billing = billing_inputs(compiled)
     require(
         all((calculation.get(k) == v for k, v in billing.items()))
+        and compiled.get("target_asset_id") == calculation.get("target_asset_id")
         and s.get("estimate_context") == calculation.get("estimate_context")
         and (s.get("fx") == calculation.get("fx")),
         "Request differs from cost artifact; run main.py cost again",

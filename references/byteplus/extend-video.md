@@ -13,7 +13,6 @@
 | `duration` | 必需 | 2.5 支持整数 4～30 秒或 `-1`；2.0 系列支持整数 4～15 秒或 `-1`；无默认值，须明确输出时长；`-1` 由模型选择时长 |
 | `resolution` | 必需 | 参考[模型列表](../byteplus.md#模型列表)中的分辨率约束；无默认值，须明确分辨率 |
 | `generate_audio` | 必需 | 是否生成音频；默认 `true`；用户要求无声时设为 `false` |
-| `estimate_context.target_asset_index` | 条件必需 | 多视频时必需，从 0 开始按完整素材数组定位待延长视频；单视频时可省略 |
 
 `duration` 表示传给接口的输出时长，不自动与源视频时长相加。用户只说“增加几秒”且无法确定期望的输出片段时长或最终总时长时，先澄清；不擅自截断、拼接原视频，也不把有限时长的输出描述为完整拼接成片。
 
@@ -44,7 +43,7 @@
 
 - 模式与费用
 
-任务及估价 JSON 顶层均填写 `mode`；初始化记录中写入 `providers.byteplus.mode`，不写入 `intent` 或接口 `payload`。有 `estimate_context` 时，将其完整同步到该供应商的初始化记录、估价输入与提交 JSON。
+任务及估价 JSON 顶层均填写 `mode`；初始化记录中写入 `providers.byteplus.mode`，不写入 `intent` 或接口 `payload`。有 `target_asset_id` 时，将其同步到 `providers.byteplus.target_asset_id`、估价输入与提交 JSON 顶层；有 `estimate_context` 时仍完整同步。
 
 2.5 的 `payload.omni_reference_task_type` 固定为 `extend`，方向由提示词明确表达；2.0 系列省略该字段。`mode` 只用于本地记录与校验，不发送给供应商。提示词与方向、目标及任务类型必须一致。
 
@@ -61,6 +60,9 @@
      "provider": "byteplus", // 必需：供应商，供脚本选择对应适配器
      "operation": "extend-video", // 必需：能力，供脚本选择接口及结果处理方式
      "mode": "after", // 必需：before 向前延长、after 向后延长；须与确认单一致，不提交给供应商
+     // 多视频延长时必填：引用 assets 中待延长视频的 id，不按数组下标编号。
+     // 单视频时可省略；仅供技能估价和规格核验，不提交给供应商。
+     "target_asset_id": "source",
      "original_prompt": "将熊猫视频向后延长，输出 4 秒片段，480p，继续草地环境声", // 流程记录：用户原始提示词，不提交给供应商
      "assets": [ // 必需：本方案使用的素材，按输入顺序排列，由脚本解析，不直接提交给供应商
        {

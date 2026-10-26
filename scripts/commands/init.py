@@ -30,6 +30,7 @@ r"""命令行调用
     "volcengine": { // object；一家供应商的模型、能力、参数和有序素材引用。
       "model": "doubao-seedance-2-5-260628", // string；本供应商技能模型别名或准确模型 ID。
       "operation": "image-to-video", // Operation；与 intent.operation 对应的已实现能力。
+      // "target_asset_id": "main-video", // string?；多视频编辑/延长时引用顶层素材目录中的目标视频 id；其他任务省略。
       "parameters": { // object；按该能力已确定的生成参数；每个字段见 __init__.py。
         "ratio": "adaptive", // string?；构图比例；视频还可用 adaptive，图片不直接发送 ratio 字段。
         "resolution": "480p", // string?；视频分辨率，如 480p/720p/1080p/4k，须模型支持。

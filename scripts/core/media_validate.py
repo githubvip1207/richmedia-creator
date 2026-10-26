@@ -134,11 +134,9 @@ def verification_source(compiled, context=None):
     if operation == 'image-to-video':
         return assets[0] if assets else None
     if operation == 'extend-video' or (operation == 'reference-to-video' and compiled.get('mode') == 'edit'):
-        candidates = [i for i, asset in enumerate(assets) if asset['kind'] == 'video']
-        index = (context or {}).get('target_asset_index')
-        if index is None and len(candidates) == 1:
-            index = candidates[0]
-        if type(index) is int and index in candidates:
+        from core.target_asset import target_index
+        index = target_index(assets, compiled.get('target_asset_id'), context)
+        if index is not None:
             return assets[index]
     return None
 

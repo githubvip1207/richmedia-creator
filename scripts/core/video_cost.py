@@ -176,6 +176,8 @@ def calculate_video_cost(compiled, context, price, fx, table, target):
            'pricing_freshness': freshness(price), 'range_is_guaranteed': False}
     if selected is not None:
         out['target_asset_index'] = selected
+        if compiled.get('target_asset_id') is not None:
+            out['target_asset_id'] = compiled['target_asset_id']
     if video:
         floors, evidence = minimum_floor(compiled, ctx, durations, dimensions, price, table, uncertainties)
         tokens = [max(t, math.ceil(f)) for t, f in zip(tokens, floors)]

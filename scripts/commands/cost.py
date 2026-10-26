@@ -66,9 +66,9 @@ r"""命令行调用
         "threshold_pixels": 2610000 // integer；区分低/高档的像素数量；超过门槛进入高档。
       }
     },
+    "target_asset_id": "main-video", // string?；引用目标视频素材 id，与估价输入一致。
     "estimate_context": { // EstimateContext | null；本次补充依据；未提供时 null。
       "output_dimensions": [854, 480], // [integer, integer]?；有依据的输出像素 [宽, 高]，须与所选规格相容。
-      "target_asset_index": 0, // integer?；编辑/延长的目标在完整 assets 数组中的下标，从 0 开始。
       "preferred_duration": 10 // number?；自动时长中期望的秒数；仅标记费用情景，不改 API 参数。
     },
     "fx": { // Fx | null；实际采用的有效汇率；没有有效值时 null。
@@ -94,7 +94,7 @@ r"""命令行调用
     "resolution": "480p", // string?；视频输出分辨率。
     "ratio": "16:9", // string?；视频输出比例参数。
     "duration": 5, // integer?；视频 API 输出时长参数，可能为 -1。
-    "target_asset_index": 0, // integer?；估价选定的完整素材数组下标，从 0 开始。
+    "target_asset_index": 0, // integer?；估价选定的完整素材数组下标，仅作审计；任务输入使用顶层 target_asset_id。
     "assumed_output_dimensions": [854, 480], // [integer,integer]?；视频首个估算尺寸 [宽,高]，不保证实际输出像素。
     "output_dimension_candidates": [[854, 480]], // [integer,integer][]?；费用范围计算采用的所有输出像素候选。
     "output_dimensions_basis": "official_ratio_table", // string?；official_ratio_table/source_ratio_and_official_table/ provided_estimate/official_adaptive_candidates/source_ratio_area_estimate。

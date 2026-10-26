@@ -122,8 +122,9 @@
       "source": "/absolute/path/first-frame.png" // 必填：真实本地绝对路径或 HTTPS URL；脚本自动测量时长和尺寸。
     }
   ],
+  // 多视频编辑/延长时必填：引用 assets 中目标视频的 id；单视频时可省略。
+  // "target_asset_id": "main-video",
   "estimate_context": { // 条件字段：仅填写满足下列条件的项；全部不适用时省略整个对象，不传给生成 API。
-    // "target_asset_index": 0, // 多视频编辑/延长时必填；目标在完整 assets 数组中的下标，从 0 开始。
     // "preferred_duration": 10, // 仅 duration=-1 且用户明确期望秒数时填写；只标记费用情景，不控制实际时长。
     // "output_dimensions": [854, 480] // 仅脚本无法自动确定输出像素、且有官方明确尺寸依据时填写；不是输入素材尺寸。
   }

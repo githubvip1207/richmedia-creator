@@ -46,6 +46,7 @@ r"""命令行调用
       "purpose": "参考主体外观" // string?；素材用途；init/submit 必需；估价入口禁止传此字段。
     }
   ],
+  "target_asset_id": "main-video", // string?；仅编辑/延长可用，引用 assets 中目标视频 id；多视频时必填，不发送给供应商。
   "budget_cny": 100.0, // number?；正数；按人民币估算范围终点比较的预算，不是供应商扣款限额。
   "budget_usd": 20.0 // number?；正数；按美元估算范围终点比较的预算，不是供应商扣款限额。
 }
@@ -435,6 +436,10 @@ def validate_requirement(directory, spec, compiled):
     require(
         selected.get("estimate_context") == spec.get("estimate_context"),
         "Submission estimate_context differs from request.json; update the plan and reconfirm",
+    )
+    require(
+        selected.get("target_asset_id") == spec.get("target_asset_id"),
+        "Submission target_asset_id differs from request.json; update the plan and reconfirm",
     )
     parameters = selected.get("parameters")
     require(isinstance(parameters, dict), "Supplier parameters missing from request.json")

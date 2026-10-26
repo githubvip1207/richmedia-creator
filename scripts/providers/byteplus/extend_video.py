@@ -10,6 +10,7 @@ import json
 import math
 import re
 from core.validation import require, number
+from core.target_asset import target_index, validate_target_scope
 from core.catalogs import ROOT, CATALOGS, RATIOS
 from core.operations import internal_operation
 from core.cost_record import build_record
@@ -90,19 +91,9 @@ def validate_reference_metadata(kind, metadata, model, editing=False):
     )
 
 
-def validate_reference_target(operation, mode, assets, context, require_target=True):
-    videos = [i for i, asset in enumerate(assets) if asset["kind"] == "video"]
-    require(bool(videos), "Editing/extension needs a video")
-    require(context is None or isinstance(context, dict), "estimate_context must be an object")
-    selected = (context or {}).get("target_asset_index")
-    require(
-        selected is None or (type(selected) is int and selected in videos),
-        "target_asset_index must identify the editing/extension source video",
-    )
-    require(
-        not require_target or len(videos) == 1 or selected is not None,
-        "Multiple videos require estimate_context.target_asset_index for editing/extension",
-    )
+def validate_reference_target(operation, mode, assets, context, require_target=True, target_asset_id=None):
+    require(any(asset['kind'] == 'video' for asset in assets), "Editing/extension needs a video")
+    target_index(assets, target_asset_id, context, require_target=require_target)
 
 
 def validate_reference_request_size(assets, template=None):
@@ -179,6 +170,7 @@ def compile_request(spec, measured_assets=None):
     from core.operations import internal_operation
 
     require_identity(spec)
+    validate_target_scope(spec)
     allowed = {
         "provider",
         "operation",
@@ -187,6 +179,7 @@ def compile_request(spec, measured_assets=None):
         "payload",
         "assets",
         "estimate_context",
+        "target_asset_id",
         "budget_cny",
         "budget_usd",
         "fx",
@@ -304,7 +297,7 @@ def compile_request(spec, measured_assets=None):
             inputs, measured_assets, models[alias], editing=op == "edit-video"
         )
         validate_reference_target(
-            "extend-video", spec["mode"], assets, spec.get("estimate_context")
+            "extend-video", spec["mode"], assets, spec.get("estimate_context"), target_asset_id=spec.get("target_asset_id")
         )
         validate_reference_request_size(assets, body)
         for index, asset in enumerate(assets):
@@ -341,6 +334,7 @@ def compile_request(spec, measured_assets=None):
         **{"mode": spec["mode"]},
         "prompt": prompt,
         "assets": assets,
+        **({"target_asset_id": spec["target_asset_id"]} if "target_asset_id" in spec else {}),
         "parameters": params,
         "payload_template": body,
         "warnings": [],
@@ -354,6 +348,7 @@ def compile_request(spec, measured_assets=None):
 def validate_cost_inputs(inputs, measured_assets=None):
     """仅校验计费输入，不需要提示词、虚构素材或生成请求正文。"""
     require_identity(inputs)
+    validate_target_scope(inputs)
     get_provider(PROVIDER)
     models = CATALOGS[PROVIDER]["models"]
     model = inputs["model"]
@@ -440,6 +435,7 @@ def validate_cost_inputs(inputs, measured_assets=None):
         **({"mode": inputs["mode"]} if inputs.get("mode") is not None else {}),
         "parameters": params,
         "assets": assets,
+        **({"target_asset_id": inputs["target_asset_id"]} if "target_asset_id" in inputs else {}),
     }
 
 
@@ -449,22 +445,10 @@ from core.video_dimensions import table_dimensions
 def target_asset(compiled, context):
     """明确选择目标素材；此选择仅用于估价，不作为 API 控制参数。"""
     assets, operation = (compiled["assets"], internal_operation(compiled))
-    if operation in ("first-frame", "first-last-frame"):
-        candidates = [0] if assets else []
-    elif operation in ("edit-video", "extend-video"):
-        candidates = [i for i, a in enumerate(assets) if a["kind"] == "video"]
-    else:
-        candidates = []
-    selected = (context or {}).get("target_asset_index")
-    if selected is not None:
-        require(
-            type(selected) is int and selected in candidates,
-            "target_asset_index must identify the first frame or an editing/extension source video",
-        )
-        return (selected, assets[selected])
-    if len(candidates) == 1:
-        return (candidates[0], assets[candidates[0]])
-    return (None, None)
+    if operation not in ("edit-video", "extend-video"):
+        return (None, None)
+    selected = target_index(assets, compiled.get("target_asset_id"), context)
+    return (selected, assets[selected]) if selected is not None else (None, None)
 
 
 
@@ -496,6 +480,7 @@ def calculate_inputs(inputs, pricing=None, context=None, fx=None, measured_asset
 # 估价入口：测量素材后计算报价；不提交生成任务。
 def cost(inputs, fx=None):
     require_identity(inputs)
+    validate_target_scope(inputs)
     allowed = {
         "provider",
         "model",
@@ -507,6 +492,7 @@ def cost(inputs, fx=None):
         "duration",
         "assets",
         "estimate_context",
+        "target_asset_id",
     }
     require(isinstance(inputs, dict), "Cost input must be a JSON object")
     require(
@@ -528,7 +514,7 @@ def cost(inputs, fx=None):
     internal_operation(inputs)
     validate_reference_sources(assets)
     validate_reference_target(
-        "extend-video", inputs["mode"], assets, inputs.get("estimate_context"), require_target=False
+        "extend-video", inputs["mode"], assets, inputs.get("estimate_context"), require_target=False, target_asset_id=inputs.get("target_asset_id")
     )
     measured = [media_probe.probe_asset(a) for a in assets]
     catalog = CATALOGS[PROVIDER]["models"]

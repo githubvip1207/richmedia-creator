@@ -63,7 +63,8 @@ def cost_input(spec):
             'operation': spec['operation'], 'mode': spec['mode'],
             **{k: spec['payload'][k] for k in ('resolution', 'ratio', 'duration')},
             'assets': [{k: a[k] for k in ('id', 'kind', 'source')} for a in spec['assets']],
-            **({'estimate_context': spec['estimate_context']} if 'estimate_context' in spec else {})}
+            **({'estimate_context': spec['estimate_context']} if 'estimate_context' in spec else {}),
+            **({'target_asset_id': spec['target_asset_id']} if 'target_asset_id' in spec else {})}
 
 
 def quote_for(spec, overrides=None):
@@ -81,6 +82,8 @@ def prepare(work, spec):
     selected = {'model': spec['payload']['model'], 'operation': spec['operation'], 'mode': spec['mode'],
                 'parameters': {k: spec['payload'][k] for k in ('resolution', 'ratio', 'duration', 'generate_audio')},
                 'assets': [{'id': a['id']} for a in spec['assets']]}
+    if 'target_asset_id' in spec:
+        selected['target_asset_id'] = spec['target_asset_id']
     if 'estimate_context' in spec:
         selected['estimate_context'] = spec['estimate_context']
     store.write(work / 'request.json', {'original_prompt': spec['original_prompt'],
