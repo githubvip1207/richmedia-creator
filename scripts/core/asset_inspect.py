@@ -88,3 +88,10 @@ def inspect_asset(asset):
             if duration:
                 a["metadata"]["duration"] = float(duration)
     return a
+
+
+def quoted_asset_matches(measured, asset):
+    """估价 ID 可省略；已提供时必须一致，来源、类型和顺序始终核对。"""
+    return (measured.get('kind') == asset.get('kind')
+            and measured.get('source') == asset.get('source')
+            and ('id' not in measured or measured['id'] == asset.get('id')))

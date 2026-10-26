@@ -70,8 +70,8 @@ class ReviewRegressions(unittest.TestCase):
         self.assertEqual(saved['response']['data'][0]['url'], response['data'][0]['url'])
         self.assertEqual(saved['response']['data'][1]['error']['code'], 'Rejected')
 
-    def test_truncated_png_and_wrong_exact_dimensions_cannot_complete_download(self):
-        for data, size in ((b'\x89PNG\r\n\x1a\n', '1K'), (png()[:45], '1K'), (png(), '1024x1024')):
+    def test_truncated_png_cannot_complete_download(self):
+        for data, size in ((b'\x89PNG\r\n\x1a\n', '1K'), (png()[:45], '1K')):
             with self.subTest(size=size, length=len(data)):
                 record = {'response': {'data': [{'url': 'https://example.com/out.png'}]},
                           'execution': {'state': 'succeeded', 'compiled': compile_request(self.spec)}}

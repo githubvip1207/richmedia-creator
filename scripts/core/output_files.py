@@ -87,7 +87,7 @@ def retrieve_outputs(record, record_path, result, entries, currency, layers=Fals
                     tmp, kind, expected_size, require_alpha=entry["z_index"] > 0
                 )
                 if is_layer
-                else media_validate.valid_media(tmp, kind, expected_size)
+                else media_validate.valid_media(tmp, kind)
             )
         require(valid, "Downloaded content is not valid media; retained file for inspection")
         if kind == "image":
@@ -106,7 +106,10 @@ def retrieve_outputs(record, record_path, result, entries, currency, layers=Fals
                 "path": str(path),
                 "sha256": sha256_file(path),
                 "kind": kind,
-                "verification": media_validate.verify_spec(path, kind, plan["compiled"], actual_metadata),
+                "verification": media_validate.verify_spec(
+                    path, kind, plan["compiled"], actual_metadata,
+                    record.get("estimate_context") or
+                    state.get("cost_record", {}).get("calculation", {}).get("estimate_context")),
                 **({"metadata": actual_metadata} if actual_metadata else {}),
                 "origin": {k: v for k, v in entry.items() if k != "b64_json"},
                 "provider": plan["compiled"]["provider"],

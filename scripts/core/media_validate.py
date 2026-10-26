@@ -43,7 +43,11 @@ def video_metadata(path):
             and (int(stream.get("nb_read_frames", 0)) > 0),
             "Invalid video stream",
         )
+        from core.media_probe import display_dimensions
+        display_width, display_height = display_dimensions(stream)
         return {
+            "display_width": display_width,
+            "display_height": display_height,
             "width": stream["width"],
             "height": stream["height"],
             "duration": duration,
@@ -123,11 +127,28 @@ def valid_media(path, kind, expected_size=None, require_alpha=False):
         return False
 
 
-def verify_spec(path, kind, compiled, metadata=None):
+def verification_source(compiled, context=None):
+    """从已确认素材中定位首帧或编辑、延长的目标，不猜测多视频目标。"""
+    assets = compiled.get('assets', [])
+    operation = compiled.get('operation')
+    if operation == 'image-to-video':
+        return assets[0] if assets else None
+    if operation == 'extend-video' or (operation == 'reference-to-video' and compiled.get('mode') == 'edit'):
+        candidates = [i for i, asset in enumerate(assets) if asset['kind'] == 'video']
+        index = (context or {}).get('target_asset_index')
+        if index is None and len(candidates) == 1:
+            index = candidates[0]
+        if type(index) is int and index in candidates:
+            return assets[index]
+    return None
+
+
+def verify_spec(path, kind, compiled, metadata=None, estimate_context=None):
     """记录可观察规格的差异；保留供应商原件，不自动重生成或隐藏已付费产物。"""
     import math
     from core.video_dimensions import table_dimensions
     from core.cost_reconcile import image_dimensions
+    from core.catalogs import CATALOGS
     p = compiled['parameters']
     actual = metadata if kind == 'video' else dict(zip(('width', 'height'), image_dimensions(path)))
     differences = []
@@ -137,6 +158,7 @@ def verify_spec(path, kind, compiled, metadata=None):
         if not matches:
             differences.append({'field': field, 'expected': expected, 'actual': observed})
     if kind == 'video':
+        source = verification_source(compiled, estimate_context)
         if p.get('resolution') and p.get('ratio') not in (None, 'adaptive'):
             dims = table_dimensions(compiled['model'], p['resolution'], p['ratio'])
             observed = [actual['width'], actual['height']]
@@ -147,9 +169,39 @@ def verify_spec(path, kind, compiled, metadata=None):
             area = actual['width'] * actual['height']
             compare('resolution', p['resolution'], [actual['width'], actual['height']],
                     min(math.prod(d) for d in choices) * .95 <= area <= max(math.prod(d) for d in choices) * 1.05)
+        if p.get('ratio') == 'adaptive' and source and p.get('resolution'):
+            m = source.get('metadata', {})
+            width = m.get('display_width', m.get('width'))
+            height = m.get('display_height', m.get('height'))
+            if width and height:
+                expected_ratio = width / height
+                if compiled['model'] == 'seedance-2.5':
+                    observed_ratio = (actual.get('display_width', actual['width']) /
+                                      actual.get('display_height', actual['height']))
+                    compare('ratio', [width, height], [actual['width'], actual['height']],
+                            abs(math.log(observed_ratio / expected_ratio)) <= .01)
+                else:
+                    # 2.0 输出标准比例；采用该模型的像素表，容纳 864×496 等取整规格。
+                    ratios = [16 / 9, 4 / 3, 1, 3 / 4, 9 / 16, 21 / 9]
+                    distances = [abs(math.log(expected_ratio / ratio)) for ratio in ratios]
+                    nearest = min(range(len(ratios)), key=distances.__getitem__)
+                    allowed = [choices[nearest]] if distances[nearest] <= .01 else choices
+                    compare('dimensions', allowed, [actual['width'], actual['height']],
+                            [actual['width'], actual['height']] in allowed)
         if p.get('duration', -1) != -1:
             # 容器时间基和尾帧取整允许最多约半秒差异。
             compare('duration', p['duration'], actual['duration'], abs(actual['duration'] - p['duration']) <= .5)
+        else:
+            maximum = CATALOGS[compiled['provider']]['models'][compiled['model']]['max_duration']
+            compare('duration', [4, maximum], actual['duration'],
+                    3.5 <= actual['duration'] <= maximum + .5)
+            if (compiled['model'] == 'seedance-2.5' and
+                    compiled.get('operation') == 'reference-to-video' and
+                    compiled.get('mode') == 'edit' and source):
+                seconds = source.get('metadata', {}).get('duration')
+                if seconds is not None:
+                    compare('source_duration', seconds, actual['duration'],
+                            abs(actual['duration'] - seconds) <= .5)
         if 'generate_audio' in p:
             compare('has_audio', p['generate_audio'], actual['has_audio'], p['generate_audio'] == actual['has_audio'])
     elif compiled['kind'] == 'image' and compiled['operation'] != 'decompose-layers':

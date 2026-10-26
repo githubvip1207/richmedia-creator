@@ -118,7 +118,7 @@ r"""命令行调用
 已捕获异常的 stderr JSON 格式见 __init__.py；命令行参数错误使用 argparse usage 文本。
 """
 
-from core.delivery_files import publish_outputs
+from core.delivery_files import publish_outputs, verified_delivery
 import os
 import shutil
 from pathlib import Path
@@ -148,6 +148,15 @@ def deliver(submission, destination=None):
     )
     with lock(record_path.parent):
         record = read(record_path)
+        completed = verified_delivery(record)
+        if completed and Path(completed["directory"]).parent == destination:
+            if record.get("delivery") != completed:
+                if record.get("delivery"):
+                    record.setdefault("delivery_history", []).append(record["delivery"])
+                record["delivery"] = completed
+            record["execution"]["delivery_complete"] = True
+            write(record_path, record)
+            return completed
         record["execution"].setdefault("delivery_complete", False)
         write(record_path, record)
         cached = record["execution"].get("download_complete") is True
@@ -156,6 +165,7 @@ def deliver(submission, destination=None):
             if record.get("result", {}).get("metadata"):
                 items.append(record["result"]["metadata"])
             cached = bool(items) and all(Path(f["path"]).is_file() and sha256_file(f["path"]) == f["sha256"] for f in items)
+        cached = cached or completed is not None
         if not cached:
             record["execution"]["delivery_complete"] = False
             write(record_path, record)

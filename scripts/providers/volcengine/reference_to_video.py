@@ -15,7 +15,7 @@ from core.operations import internal_operation
 from core.cost_record import build_record
 from core.cost_quote import billing_inputs
 from core import media_probe, payload as payload_tools, submission_store as store
-from core.asset_inspect import inspect_asset
+from core.asset_inspect import inspect_asset, quoted_asset_matches
 from core.output_files import retrieve_outputs
 from providers import get_provider
 from . import client
@@ -145,7 +145,7 @@ def compile_reference_assets(inputs, measured_assets, model, editing=False):
     assets = []
     for item, measured in zip(inputs, measured_assets):
         require(
-            all((item[k] == measured.get(k) for k in ("id", "kind", "source"))),
+            quoted_asset_matches(measured, item),
             "Reference sources/order differ from cost artifact; estimate again",
         )
         asset = inspect_asset({k: v for k, v in item.items() if k != "id"})

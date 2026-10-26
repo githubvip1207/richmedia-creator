@@ -15,7 +15,7 @@ from core.operations import internal_operation
 from core.cost_record import build_record
 from core.cost_quote import billing_inputs
 from core import media_probe, payload as payload_tools, submission_store as store
-from core.asset_inspect import inspect_asset
+from core.asset_inspect import inspect_asset, quoted_asset_matches
 from core.payload_size import validate_image_request_size
 from core.output_files import retrieve_outputs
 from providers import get_provider
@@ -67,9 +67,7 @@ def compile_image_assets(inputs, measured_assets, operation="image-to-image"):
         measured = measured_assets[index] if measured_assets is not None else None
         if measured is not None:
             require(
-                measured.get("kind") == "image"
-                and measured.get("source") == source
-                and (measured.get("id") == inputs[index]["id"]),
+                quoted_asset_matches(measured, inputs[index]),
                 "Image sources/order differ from cost artifact; estimate again",
             )
         asset = inspect_asset({k: v for k, v in inputs[index].items() if k != "id"})

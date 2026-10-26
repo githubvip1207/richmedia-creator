@@ -8,10 +8,44 @@ from core.submission_store import read, write, lock, now
 from core.file_hash import sha256_file
 
 
+def verified_delivery(record):
+    """按清单和哈希核对当前或历史交付，支持缓存清理及发布中断后的恢复。"""
+    result = record.get("result", {})
+    expected = list(result.get("files", []))
+    if not expected:
+        return None
+    if result.get("metadata"):
+        expected.append(result["metadata"])
+    candidates = [record.get("delivery"), *reversed(record.get("delivery_history", []))]
+    for previous in candidates:
+        if not previous:
+            continue
+        actual = list(previous.get("files", []))
+        if bool(result.get("metadata")) != bool(previous.get("metadata")):
+            continue
+        if previous.get("metadata"):
+            actual.append(previous["metadata"])
+        directory = Path(previous["directory"])
+        if (len(expected) != len(actual) or not directory.is_dir() or directory.is_symlink()):
+            continue
+        if all(Path(item["path"]).parent == directory
+               and Path(item["path"]).name == Path(source["path"]).name
+               and item["sha256"] == source["sha256"]
+               and not Path(item["path"]).is_symlink()
+               and Path(item["path"]).is_file()
+               and sha256_file(item["path"]) == source["sha256"]
+               for source, item in zip(expected, actual)):
+            return previous
+    return None
+
+
 def publish_outputs(record_path, destination):
     with lock(record_path.parent):
         record = read(record_path)
         result = record["result"]
+        completed = verified_delivery(record)
+        if completed:
+            record["execution"]["download_complete"] = True
         record["execution"]["delivery_complete"] = False
         write(record_path, record)
         require(
@@ -20,6 +54,12 @@ def publish_outputs(record_path, destination):
         sources = [*result["files"]]
         if result.get("metadata"):
             sources.append(result["metadata"])
+        if completed:
+            delivered_sources = list(completed["files"])
+            if completed.get("metadata"):
+                delivered_sources.append(completed["metadata"])
+            sources = [item if Path(item["path"]).is_file() and sha256_file(item["path"]) == item["sha256"]
+                       else delivered for item, delivered in zip(sources, delivered_sources)]
         for item in sources:
             require(
                 Path(item["path"]).is_file() and sha256_file(item["path"]) == item["sha256"],
@@ -71,7 +111,7 @@ def publish_outputs(record_path, destination):
                     os.fsync(output.fileno())
             require(sha256_file(target) == item["sha256"], "Delivered file checksum mismatch")
             final = {"path": str(target), "sha256": item["sha256"]}
-            if item is result.get("metadata"):
+            if result.get("metadata") and Path(item["path"]).name == Path(result["metadata"]["path"]).name:
                 delivered["metadata"] = final
             else:
                 final.update(
