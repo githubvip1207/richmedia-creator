@@ -196,7 +196,13 @@ class PriceBehavior(unittest.TestCase):
         self.assertEqual(e['status'],'estimate')
         self.assertGreaterEqual(e['amount_cny'][1], e['amount_cny'][0])
         floor = e['tokens'][0]*2
-        resolved = estimate(c,{'minimum_billable_tokens':floor,'minimum_tokens_source':'https://docs.volcengine.com/example'})
+        from core.pricing import load_pricing
+        pricing=load_pricing('volcengine')
+        pricing['minimum_token_estimation']['rules']=[{'model':c['model'],
+            'resolution':c['parameters']['resolution'],'ratio':c['parameters']['ratio'],
+            'duration':c['parameters']['duration'],'tokens':floor,
+            'source':'https://docs.volcengine.com/example','verified_on':'2026-10-26'}]
+        resolved = estimate(c,pricing=pricing)
         self.assertEqual(resolved['tokens'],[floor,floor])
 
     # 自适应比例缺少可靠输出尺寸时，金额应为未知，不能按零费用展示。

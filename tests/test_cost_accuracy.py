@@ -190,3 +190,79 @@ class Accuracy(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class SupplierPricingConfiguration(unittest.TestCase):
+    def test_supplier_minimum_rules_override_fallback_without_task_price_inputs(self):
+        for provider in ('volcengine', 'byteplus'):
+            with self.subTest(provider=provider):
+                from core.pricing import load_pricing
+                pricing = load_pricing(provider)
+                source = pricing['source']
+                pricing['minimum_token_estimation']['rules'] = [{
+                    'model': 'seedance-2.5', 'resolution': '480p', 'ratio': '16:9',
+                    'duration': 5, 'tokens': 200000, 'source': source,
+                    'verified_on': '2026-10-26'}]
+                with patch('core.pricing.load_pricing', return_value=pricing):
+                    result = quote(provider)
+                self.assertEqual(result['tokens'], [200000, 200000])
+                self.assertEqual(result['minimum_tokens_evidence']['method'], 'configured_official_table')
+                self.assertEqual(result['minimum_tokens_source'], source)
+                # A different duration must not reuse the five-second minimum row.
+                with patch('core.pricing.load_pricing', return_value=pricing):
+                    other = quote(provider, duration=10)
+                self.assertEqual(other['minimum_tokens_evidence']['method'], 'public_example_scaled')
+
+    def test_task_context_cannot_override_supplier_minimum_pricing(self):
+        for provider in ('volcengine', 'byteplus'):
+            with self.subTest(provider=provider), self.assertRaisesRegex(ValueError, 'Unknown estimate_context'):
+                quote(provider, context={'minimum_billable_tokens': 1,
+                                         'minimum_tokens_source': 'https://docs.volcengine.com/example'})
+
+    def test_examples_are_owned_by_each_supplier_and_keep_their_own_date(self):
+        for provider in ('volcengine', 'byteplus'):
+            pricing = json.loads((ROOT / 'models' / (provider + '-pricing.json')).read_text())
+            evidence = pricing['minimum_token_estimation']
+            self.assertEqual(evidence['anchor_duration'], 5)
+            self.assertEqual(evidence['anchor_ratio'], '16:9')
+            for model, resolutions in pricing['video'].items():
+                for resolution in resolutions:
+                    self.assertGreater(evidence['examples'][model][resolution], 0)
+                    self.assertGreater(evidence['rates'][model][resolution], 0)
+            with patch('core.pricing.load_pricing', return_value=pricing):
+                result = quote(provider)
+            self.assertEqual(result['minimum_tokens_evidence']['verified_on'], evidence['verified_on'])
+
+    def test_old_unit_price_cache_gets_current_supplier_minimum_configuration(self):
+        from core.pricing import load_pricing, pricing_session
+        from core.submission_store import write
+        for provider in ('volcengine', 'byteplus'):
+            original = load_pricing(provider)
+            cached = copy.deepcopy(original)
+            cached.pop('minimum_token_estimation')
+            cached['verified_on'] = dt.datetime.now(dt.timezone.utc).date().isoformat()
+            with tempfile.TemporaryDirectory() as tmp:
+                write(Path(tmp) / (provider + '-pricing-cache.json'), cached)
+                with pricing_session(tmp):
+                    result = load_pricing(provider)
+            self.assertEqual(result['minimum_token_estimation'], original['minimum_token_estimation'])
+            self.assertEqual(result['video'], cached['video'])
+
+    def test_unit_price_refresh_does_not_reverify_minimum_data(self):
+        provider = 'byteplus'
+        original = json.loads((ROOT / 'models' / (provider + '-pricing.json')).read_text())
+        # Use the same official Markdown layout as the existing parser regression.
+        from core.catalogs import CATALOGS
+        lines = ['minimum 2.61']
+        for mode, heading in [(0, 'without'), (1, 'with')]:
+            lines.append('**Tab: Input ' + heading + ' video**')
+            for alias, rows in original['video'].items():
+                values = [rows['480p'][mode]] + [rows.get(r, [None, None])[mode] for r in ('1080p', '4k')]
+                lines.append('| ' + CATALOGS[provider]['models'][alias]['id'] + ' | ' + ' | '.join(
+                    '$' + str(v) if v is not None else 'Not supported' for v in values) + ' | Not supported |')
+        lines.extend(['## Image generation',
+            '| ' + CATALOGS[provider]['models']['seedream-5.0-pro']['id'] + ' | $0.003 | $0.045 | $0.09 | $0.0225 | $0.045 |',
+            '| ' + CATALOGS[provider]['models']['seedream-5.0-flash']['id'] + ' | Free | $0.018 |'])
+        original['minimum_token_estimation']['verified_on'] = '2020-01-01'
+        updated = parse_markdown('\n'.join(lines), provider, original)
+        self.assertEqual(updated['minimum_token_estimation'], original['minimum_token_estimation'])
+        self.assertEqual(updated['minimum_token_estimation']['verified_on'], '2020-01-01')

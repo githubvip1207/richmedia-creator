@@ -98,14 +98,6 @@ EstimateContext（JSON 字段模板；按能力选用）
 ```jsonc
 {
   "output_dimensions": [854, 480], // [integer, integer]?；有依据的输出像素 [宽, 高]，须与所选规格相容。
-  "minimum_billable_tokens": 86400, // number | Pair?；官方门槛；自动时长需要覆盖全范围的一对数值。
-  "minimum_tokens_source": "https://docs.volcengine.com/docs/ark/model-pricing", // string?；手动门槛对应官方 HTTPS 文档/计算器；与门槛一起填写。
-  "minimum_tokens_spec": { // object?；门槛适用规格；提供时必须与本次估价一致。
-    "model": "seedance-2.5", // string；技能模型别名。
-    "resolution": "480p", // string；本次输出分辨率。
-    "ratio": "16:9", // string；本次比例参数，包括 adaptive。
-    "duration": 5 // integer；本次时长参数，包括 -1。
-  },
   "target_asset_index": 0, // integer?；编辑/延长的目标在完整 assets 数组中的下标，从 0 开始。
   "preferred_duration": 10 // number?；自动时长中期望的秒数；仅标记费用情景，不改 API 参数。
 }
@@ -183,6 +175,7 @@ NativePayload（JSON 字段模板；按能力选用）
   "provider": "volcengine", // Provider?；可选显式供应商标识；部分既有快照未保存。
   "basis": "示例计费依据", // string；公开刊例价格适用范围及未包含费用说明。
   "verification_source": "https://example.com/official-pricing.md", // string?；成功核价使用的官方 Markdown URL。
+  "minimum_token_estimation": {}, // object；官方最低用量规则、公开价格示例及核实日期；逐字段格式见对应供应商文档的“预估成本”。
   "video": { // object；按视频模型别名索引费率。
     "seedance-2.5": { // VideoRates；视频模型费率，各分辨率数组按无/有视频输入排序。
       "480p": [1.0, 2.0] // Pair；当前输出分辨率对应 [无视频输入单价, 有视频输入单价]，单位 currency/百万 Token。
@@ -243,9 +236,15 @@ OutputVerification（下载/交付文件的 verification；可解码不等于符
 最低门槛来源（MinimumEvidence，以下为字段格式，按 method 选择适用字段）
 ```jsonc
 {
-  "method": "public_example_scaled", // string；provided_official_source/public_example_rounded/public_example_scaled。
+  "method": "public_example_scaled", // string；configured_official_table/public_example_rounded/public_example_scaled。
+  "specification": { // object?；使用配置中官方门槛行时记录适用规格。
+    "model": "seedance-2.5", // string；模型别名。
+    "resolution": "480p", // string；输出分辨率。
+    "ratio": "16:9", // string；输出比例参数。
+    "duration": 5 // number；输出秒数参数，自动为 -1。
+  },
   "source": "https://docs.volcengine.com/docs/ark/model-pricing", // string；采用的官方门槛或公开价格示例来源。
-  "verified_on": "2026-10-25", // string?；公开示例核实日期，YYYY-MM-DD。
+  "verified_on": "2026-10-25", // string?；实际采用的门槛行或公开示例核实日期，YYYY-MM-DD。
   "anchor_duration": 5, // number?；公开示例输出秒数。
   "anchor_dimensions": [854, 480], // integer[]?；公开示例输出 [宽,高]。
   "anchor_amount": 3.63, // number?；示例最低价格，供应商原币。

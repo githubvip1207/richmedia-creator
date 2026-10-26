@@ -84,5 +84,63 @@
       ]
     }
   },
-  "verification_source": "https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing.md"
+  "verification_source": "https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing.md",
+  "minimum_token_estimation": {
+    "verified_on": "2026-10-25",
+    "basis": "Official rounded 5s, 16:9, with-video minimum price examples. Not the inaccessible minimum-token table. Other specifications use explicitly labelled area/time extrapolation.",
+    "source": "https://docs.byteplus.com/en/docs/modelark/model-pricing",
+    "rounding": 0.005,
+    "examples": {
+      "seedance-2.5": {
+        "480p": 0.553,
+        "720p": 1.244,
+        "1080p": 3.062
+      },
+      "seedance-2.0": {
+        "480p": 0.39,
+        "720p": 0.84,
+        "1080p": 2.06,
+        "4k": 4.2
+      },
+      "seedance-2.0-fast": {
+        "480p": 0.3,
+        "720p": 0.64
+      },
+      "seedance-2.0-mini": {
+        "480p": 0.19,
+        "720p": 0.41
+      }
+    },
+    "rates": {
+      "seedance-2.5": {
+        "480p": 6.4,
+        "720p": 6.4,
+        "1080p": 7
+      },
+      "seedance-2.0": {
+        "480p": 4.3,
+        "720p": 4.3,
+        "1080p": 4.7,
+        "4k": 2.4
+      },
+      "seedance-2.0-fast": {
+        "480p": 3.3,
+        "720p": 3.3
+      },
+      "seedance-2.0-mini": {
+        "480p": 2.1,
+        "720p": 2.1
+      }
+    },
+    "rounding_by_model": {
+      "seedance-2.5": 0.0005
+    },
+    "table_sources": {
+      "2.0": "https://bytedance.larkoffice.com/wiki/H0fUwHPxtiHayOk6CVpcZzKqnHJ?table=tblnV1KjhYJO12Zh&view=vewWPcN5zJ",
+      "2.5": "https://bytedance.larkoffice.com/wiki/H0fUwHPxtiHayOk6CVpcZzKqnHJ?table=tblTUnmKaxBSqpU7&view=vewpCgsiHf"
+    },
+    "anchor_duration": 5,
+    "anchor_ratio": "16:9",
+    "rules": []
+  }
 }

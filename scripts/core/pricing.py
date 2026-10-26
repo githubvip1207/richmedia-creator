@@ -153,6 +153,9 @@ def load_pricing(provider):
         try:
             saved = json.loads(cache.read_text())
             if saved.get('currency') == original['currency'] and freshness(saved)['status'] == 'fresh':
+                # 兼容整合前的任务单价缓存；最低门槛依据独立保留原核实日期。
+                if 'minimum_token_estimation' in original:
+                    saved['minimum_token_estimation'] = copy.deepcopy(original['minimum_token_estimation'])
                 original = saved
         except (OSError, ValueError, KeyError):
             pass

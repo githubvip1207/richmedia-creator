@@ -9,57 +9,19 @@ r"""命令行调用
 
 实际文件为 UTF-8 标准 JSON，根节点为对象；下方 JSONC 的 // 仅用于逐字段说明，写文件时删除注释。
 
-输入文件 /absolute/cost-input.json
-编码 UTF-8，根节点为 JSON 对象；< 将文件内容写入 stdin，--workdir 是已有目录而不是该输入文件。
+输入文件 /absolute/cost-input.json：UTF-8 标准 JSON 对象；< 将文件内容送入 stdin。
+每家供应商、每种能力的字段要求和带注释示例只在对应供应商文档的“预估成本”章节维护：
+- references/volcengine.md#预估成本
+- references/byteplus.md#预估成本
 
-```jsonc
-{
-  "provider": "volcengine", // Provider；必填；本次估价供应商。
-  "model": "doubao-seedance-2-5-260628", // string；必填；本供应商模型别名或准确 ID。
-  "operation": "image-to-video", // Operation；必填；已实现能力标识。
-  "resolution": "480p", // string?；视频必填，模型支持的输出分辨率。
-  "ratio": "adaptive", // string?；视频必填，固定比例或 adaptive。
-  "duration": 5, // integer?；视频必填，输出秒数或模型允许的 -1。
-  "assets": [ // CostAsset[]?；有素材能力必须提供；纯文本能力省略或 []。
-    {
-      "id": "reference-1", // string?；可选唯一标识，若提供须与 init/submit 使用同一 id。
-      "kind": "image", // "image" | "video" | "audio"；必填；素材类型。
-      "source": "https://example.com/reference.png" // string；必填；实际可读的本地绝对路径或 HTTPS URL。
-    }
-  ]
-}
-```
-
-
-按能力选择的其他入参（仅填写适用字段，不与上述示例全部合并）：
-```jsonc
-{
-  "size": "1K", // string；图片能力必填；1K/1.5K/2K 或 WIDTHxHEIGHT，拆层可 auto；视频省略。
-  "mode": "reference", // string；reference-to-video 必填 reference/edit；extend-video 必填 before/after；其他能力省略。
-  "estimate_context": { // EstimateContext?；补充计费依据；逐字段见 commands/__init__.py。
-    "output_dimensions": [854, 480], // [integer, integer]?；有依据的输出像素 [宽, 高]，须与所选规格相容。
-    "minimum_billable_tokens": 86400, // number | Pair?；官方门槛；自动时长需要覆盖全范围的一对数值。
-    "minimum_tokens_source": "https://docs.volcengine.com/docs/ark/model-pricing", // string?；手动门槛对应官方 HTTPS 文档/计算器；与门槛一起填写。
-    "minimum_tokens_spec": { // object?；门槛适用规格；提供时必须与本次估价一致。
-      "model": "seedance-2.5", // string；技能模型别名。
-      "resolution": "480p", // string；本次输出分辨率。
-      "ratio": "16:9", // string；本次比例参数，包括 adaptive。
-      "duration": 5 // integer；本次时长参数，包括 -1。
-    },
-    "target_asset_index": 0, // integer?；编辑/延长的目标在完整 assets 数组中的下标，从 0 开始。
-    "preferred_duration": 10 // number?；自动时长中期望的秒数；仅标记费用情景，不改 API 参数。
-  }
-}
-```
-这些是同一输入 JSON 对象的条件字段；对应能力支持范围见供应商指南。
-
+不要在任务输入中传入单价、最低计费 Token、手算用量或最终金额；脚本从供应商价格配置读取计费数据，并自行探测素材。
 
 标准输出格式
 
 ```jsonc
 {
   "cost_file": "/tmp/richmedia-example/volcengine-priceing.json", // string；<provider>-priceing.json 的绝对路径，保留当前实际拼写。
-  "input": {}, // CostInput；原始输入文件对象的完整副本，与上面的入参相同，不重复展开。
+  "input": {}, // CostInput；原始输入文件对象的完整副本，与供应商文档定义的实际入参相同，不重复展开。
   "calculation": { // Calculation；可还原报价的单价、素材测量、公式及上下文，定义见下。
     "schema_version": 3, // 3；已保存报价结构版本。
     "created_at": "2026-10-26T00:00:00+00:00", // string；UTC ISO 8601 报价创建时间；提交时有效期 24 小时。
@@ -106,14 +68,6 @@ r"""命令行调用
     },
     "estimate_context": { // EstimateContext | null；本次补充依据；未提供时 null。
       "output_dimensions": [854, 480], // [integer, integer]?；有依据的输出像素 [宽, 高]，须与所选规格相容。
-      "minimum_billable_tokens": 86400, // number | Pair?；官方门槛；自动时长需要覆盖全范围的一对数值。
-      "minimum_tokens_source": "https://docs.volcengine.com/docs/ark/model-pricing", // string?；手动门槛对应官方 HTTPS 文档/计算器；与门槛一起填写。
-      "minimum_tokens_spec": { // object?；门槛适用规格；提供时必须与本次估价一致。
-        "model": "seedance-2.5", // string；技能模型别名。
-        "resolution": "480p", // string；本次输出分辨率。
-        "ratio": "16:9", // string；本次比例参数，包括 adaptive。
-        "duration": 5 // integer；本次时长参数，包括 -1。
-      },
       "target_asset_index": 0, // integer?；编辑/延长的目标在完整 assets 数组中的下标，从 0 开始。
       "preferred_duration": 10 // number?；自动时长中期望的秒数；仅标记费用情景，不改 API 参数。
     },

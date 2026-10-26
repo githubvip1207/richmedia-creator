@@ -1,10 +1,8 @@
 """视频估价：可核验的规格优先，无法预知的部分给出带依据的情景估算。"""
 
 import copy
-import json
 import math
 from urllib.parse import urlsplit
-from core.catalogs import ROOT
 from core.operations import internal_operation
 from core.validation import require, number
 
@@ -84,63 +82,62 @@ def dimension_options(compiled, context, source, table, notes, uncertainties):
 
 def minimum_floor(compiled, context, durations, dimensions, price, table, uncertainties):
     provider, model, p = compiled['provider'], compiled['model'], compiled['parameters']
-    supplied = context.get('minimum_billable_tokens')
-    if supplied is not None:
-        require(official_source(context.get('minimum_tokens_source'), provider),
-                'Minimum billable tokens need an official supplier table/calculator source URL')
+    from core.pricing import freshness
+    evidence = price.get('minimum_token_estimation')
+    require(isinstance(evidence, dict), 'Supplier pricing snapshot is missing minimum_token_estimation')
+    # 官方门槛属于价格配置，不接受调用方在任务入参中填写。
+    expected = {'model': model, 'resolution': p['resolution'], 'ratio': p['ratio'], 'duration': p['duration']}
+    rules = evidence.get('rules', [])
+    require(isinstance(rules, list) and all(isinstance(row, dict) for row in rules),
+            'Minimum token pricing rules must be objects')
+    matching = [row for row in rules if all(row.get(k) == v for k, v in expected.items())]
+    require(len(matching) <= 1, 'Duplicate minimum token pricing rules for this specification')
+    if matching:
+        row = matching[0]
+        require(official_source(row.get('source'), provider), 'Minimum token rule requires official supplier source')
+        supplied = row.get('tokens')
         values = supplied if isinstance(supplied, list) else [supplied, supplied]
         require(len(values) == 2 and all(number(v) and v > 0 for v in values)
                 and values[0] <= values[1], 'Minimum token range must be [positive lower, positive upper]')
         require(isinstance(supplied, list) or durations[0] == durations[1],
                 'Automatic duration needs a verified minimum token range covering the entire duration range')
-        scope = context.get('minimum_tokens_spec')
-        expected = {'model': model, 'resolution': p['resolution'], 'ratio': p['ratio'],
-                    'duration': p['duration']}
-        if scope is not None:
-            require(scope == expected, 'Minimum token evidence does not match current model/specification')
-        else:
+        if durations == [evidence['anchor_duration']] * 2 and p['ratio'] == evidence['anchor_ratio'] and freshness(evidence)['status'] == 'fresh':
+            rounding = evidence.get('rounding_by_model', {}).get(model, evidence['rounding'])
+            lower = (evidence['examples'][model][p['resolution']] - rounding) / evidence['rates'][model][p['resolution']] * 1_000_000
+            require(values[0] >= lower * .95,
+                    'Minimum tokens contradict same-spec official public price example; recheck configuration')
+        if freshness(row)['status'] != 'fresh':
             uncertainties.append({'field': 'minimum_billable_tokens', 'reason':
-                                  '手动门槛附官方链接，但未绑定规格；应核对链接内对应行。'})
-        # 同规格公开示例已经给出最低金额，不能用明显冲突的手填数值压低报价。
-        if durations == [5, 5] and p['ratio'] == '16:9':
-            from core.pricing import freshness
-            known = json.loads((ROOT / 'models' / 'video-cost-evidence.json').read_text())
-            if freshness(known)['status'] == 'fresh':
-                data = known['providers'][provider]
-                rounding = data.get('rounding_by_model', {}).get(model, data['rounding'])
-                lower = (data['examples'][model][p['resolution']] - rounding) / data['rates'][model][p['resolution']] * 1_000_000
-                require(values[0] >= lower * .95,
-                        'Minimum tokens contradict same-spec official public price example; recheck evidence')
-        return values, {'method': 'provided_official_source', 'source': context['minimum_tokens_source']}
-    evidence = json.loads((ROOT / 'models' / 'video-cost-evidence.json').read_text())
-    from core.pricing import freshness
+                                  '价格配置中的官方最低用量规则超过7天或缺少核实日期，应重新核对。'})
+        return values, {'method': 'configured_official_table', 'source': row['source'],
+                        'verified_on': row.get('verified_on'), 'specification': expected}
     if freshness(evidence)['status'] != 'fresh':
         uncertainties.append({'field': 'minimum_tokens_evidence', 'reason':
                               '公开最低价格示例依据超过7天，应重新核对门槛；本次保留历史依据估算。'})
     family = 'seedance-2.5' if model == 'seedance-2.5' else model
-    anchor = evidence['providers'][provider]['examples'][family][p['resolution']]
-    anchor_rate = evidence['providers'][provider]['rates'][family][p['resolution']]
-    anchor_dims = table(model, p['resolution'], '16:9')
+    anchor = evidence['examples'][family][p['resolution']]
+    anchor_rate = evidence['rates'][family][p['resolution']]
+    anchor_dims = table(model, p['resolution'], evidence['anchor_ratio'])
     # 公开示例最低金额为四舍五入值，反推门槛并保留其舍入区间。
-    rounding = evidence['providers'][provider].get('rounding_by_model', {}).get(model, evidence['providers'][provider]['rounding'])
+    rounding = evidence.get('rounding_by_model', {}).get(model, evidence['rounding'])
     floors = []
     for i, seconds in enumerate(durations):
         area = (min if i == 0 else max)(math.prod(d) for d in dimensions)
         value = (anchor + (-rounding if i == 0 else rounding)) / anchor_rate * 1_000_000
-        floors.append(max(1, value * seconds / 5 * area / math.prod(anchor_dims)))
-    scaled = durations != [5, 5] or any(d != anchor_dims for d in dimensions)
+        floors.append(max(1, value * seconds / evidence['anchor_duration'] * area / math.prod(anchor_dims)))
+    scaled = durations != [evidence['anchor_duration']] * 2 or any(d != anchor_dims for d in dimensions)
     uncertainties.append({'field': 'minimum_billable_tokens', 'reason':
-                          ('最低用量表未能读取；由官方5秒示例反推门槛，再按输出时长与像素面积比例外推；外推误差尚未校准。'
-                           if scaled else '最低用量表未能读取；由官方同规格5秒最低价格示例反推门槛，保留公开金额舍入误差。')})
+                          ('价格配置未提供匹配的官方门槛行；由官方5秒示例反推门槛，再按输出时长与像素面积比例外推；外推误差尚未校准。'
+                           if scaled else '价格配置未提供匹配的官方门槛行；由官方同规格5秒最低价格示例反推门槛，保留公开金额舍入误差。')})
     return floors, {'method': 'public_example_scaled' if scaled else 'public_example_rounded',
-                    'source': evidence['providers'][provider]['source'],
+                    'source': evidence['source'],
                     'verified_on': evidence['verified_on'],
                     'extrapolation_error': 'uncalibrated' if scaled else 'not_applicable',
-                    'interval_covers': ['published_price_rounding'], 'anchor_duration': 5,
+                    'interval_covers': ['published_price_rounding'], 'anchor_duration': evidence['anchor_duration'],
                     'anchor_dimensions': anchor_dims, 'anchor_amount': anchor,
                     'anchor_rate': anchor_rate,
                     'formula': '(published_minimum_price ± rounding) / anchor_rate * 1000000 * output_seconds / 5 * output_area / anchor_area',
-                    'table_source': evidence['providers'][provider].get('table_source', evidence['table_sources']['2.5' if model == 'seedance-2.5' else '2.0'])}
+                    'table_source': evidence['table_sources']['2.5' if model == 'seedance-2.5' else '2.0']}
 
 
 def calculate_video_cost(compiled, context, price, fx, table, target):
@@ -154,8 +151,7 @@ def calculate_video_cost(compiled, context, price, fx, table, target):
         validate_fx(fx)
     ctx = copy.deepcopy(context or {})
     require(isinstance(context, (dict, type(None))), 'estimate_context must be an object')
-    require(not set(ctx) - {'output_dimensions', 'minimum_billable_tokens', 'minimum_tokens_source',
-                           'minimum_tokens_spec', 'target_asset_index', 'preferred_duration'},
+    require(not set(ctx) - {'output_dimensions', 'target_asset_index', 'preferred_duration'},
             'Unknown estimate_context fields')
     uncertainties, notes = [], []
     selected, source = target(compiled, ctx)
@@ -183,7 +179,7 @@ def calculate_video_cost(compiled, context, price, fx, table, target):
     if video:
         floors, evidence = minimum_floor(compiled, ctx, durations, dimensions, price, table, uncertainties)
         tokens = [max(t, math.ceil(f)) for t, f in zip(tokens, floors)]
-        out.update(minimum_billable_tokens=ctx.get('minimum_billable_tokens', floors),
+        out.update(minimum_billable_tokens=floors,
                    minimum_tokens_source=evidence['source'], minimum_tokens_evidence=evidence)
     evidence_method = out.get('minimum_tokens_evidence', {}).get('method')
     out['estimate_quality'] = ('extrapolated' if evidence_method == 'public_example_scaled'
@@ -201,9 +197,6 @@ def calculate_video_cost(compiled, context, price, fx, table, target):
             fixed = copy.deepcopy(compiled)
             fixed['parameters']['duration'] = d
             subctx = {k: v for k, v in ctx.items() if k != 'preferred_duration'}
-            if isinstance(subctx.get('minimum_billable_tokens'), list):
-                # 自动时长门槛范围不能冒充某一秒数的精确值。
-                subctx.pop('minimum_tokens_spec', None)
             q = calculate_video_cost(fixed, subctx, price, fx, table, target)
             scenarios.append({'output_seconds': d, 'amount': q['amount'],
                               'basis': 'duration_scenario', 'preferred': d == preferred})

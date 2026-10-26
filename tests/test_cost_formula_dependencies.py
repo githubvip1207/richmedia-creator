@@ -105,8 +105,13 @@ class FormulaDependencies(unittest.TestCase):
         assets=[self.asset('video'),self.asset('video','portrait-long')]
         unknown = self.quote(operation='reference-to-video', mode='edit',ratio='adaptive',duration=-1,assets=assets)
         self.assertEqual(unknown['result']['status'],'estimate')
-        context={'target_asset_index':1,'minimum_billable_tokens':[100000,500000],
-                 'minimum_tokens_source':'https://docs.volcengine.com/test-fixture'}
+        context={'target_asset_index':1}
+        from core.pricing import load_pricing
+        pricing=load_pricing('volcengine')
+        pricing['minimum_token_estimation']['rules']=[{'model':'seedance-2.5','resolution':'480p',
+            'ratio':'adaptive','duration':-1,'tokens':[100000,500000],
+            'source':'https://docs.volcengine.com/test-fixture','verified_on':'2026-10-26'}]
+        self.enterContext(patch('core.pricing.load_pricing',return_value=pricing))
         quote=self.quote(operation='reference-to-video', mode='edit',ratio='adaptive',duration=-1,assets=assets,estimate_context=context)
         estimate=quote['calculation']
         self.assertEqual(estimate['assumed_output_dimensions'],[480,854])
@@ -118,14 +123,19 @@ class FormulaDependencies(unittest.TestCase):
         self.assertEqual(estimate['tokens'],expected)
         self.assertEqual(list(quote['result']['amount'].values()),[round(t*42/1_000_000,6) for t in expected])
         self.assertEqual([u['field'] for u in quote['result']['uncertainties'] if u['field'].startswith('estimate_context.')],[])
+        pricing['minimum_token_estimation']['rules'][0]['tokens']=100000
         with self.assertRaisesRegex(ValueError,'entire duration range'):
             self.quote(operation='reference-to-video', mode='edit',ratio='adaptive',duration=-1,assets=assets,
-                       estimate_context={**context,'minimum_billable_tokens':100000})
+                       estimate_context=context)
 
     def test_fixed_duration_floor_and_extension(self):
-        quote=self.quote(operation='extend-video', mode='after',ratio='adaptive',duration=4,assets=[self.asset('video')],
-                         estimate_context={'minimum_billable_tokens':200000,
-                                           'minimum_tokens_source':'https://docs.volcengine.com/test-fixture'})
+        from core.pricing import load_pricing
+        pricing=load_pricing('volcengine')
+        pricing['minimum_token_estimation']['rules']=[{'model':'seedance-2.5','resolution':'480p',
+            'ratio':'adaptive','duration':4,'tokens':200000,
+            'source':'https://docs.volcengine.com/test-fixture','verified_on':'2026-10-26'}]
+        self.enterContext(patch('core.pricing.load_pricing',return_value=pricing))
+        quote=self.quote(operation='extend-video', mode='after',ratio='adaptive',duration=4,assets=[self.asset('video')])
         self.assertEqual(quote['calculation']['tokens'],[200000,200000])
         self.assertEqual(list(quote['result']['amount'].values()),[8.4,8.4])
         self.assertEqual(quote['calculation']['assumed_output_dimensions'],[854,480])

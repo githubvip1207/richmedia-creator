@@ -58,17 +58,21 @@ class CostAudit(unittest.TestCase):
     def test_video_floor_and_fx_reconstruct_from_saved_evidence(self):
         data = {'provider': 'volcengine', 'model': 'seedance-2.5', 'operation': 'extend-video',
                 'mode': 'after', 'resolution': '480p', 'ratio': 'adaptive', 'duration': 4,
-                'assets': [{'id': 'clip', 'kind': 'video', 'source': 'https://example.com/clip.mp4'}],
-                'estimate_context': {'minimum_billable_tokens': 200000,
-                                     'minimum_tokens_source': 'https://docs.volcengine.com/test-fixture'}}
+                'assets': [{'id': 'clip', 'kind': 'video', 'source': 'https://example.com/clip.mp4'}]}
         fx = {'usd_cny': 7.0,
               'expires_at': (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=1)).isoformat()}
-        record = self.quote(data, fx)
+        from core.pricing import load_pricing
+        pricing=load_pricing('volcengine')
+        pricing['minimum_token_estimation']['rules']=[{'model':'seedance-2.5','resolution':'480p',
+            'ratio':'adaptive','duration':4,'tokens':200000,
+            'source':'https://docs.volcengine.com/test-fixture','verified_on':'2026-10-26'}]
+        with patch('core.pricing.load_pricing',return_value=pricing):
+            record = self.quote(data, fx)
         c, result = record['calculation'], record['result']
         seconds = sum(a['duration'] for a in c['assets'] if a['kind'] == 'video')
         formula = [math.ceil((seconds + duration) * math.prod(c['assumed_output_dimensions'])
                              * c['frames_per_second'] / 1024) for duration in c['assumed_output_duration']]
-        tokens = [max(t, math.ceil(c['minimum_billable_tokens'])) for t in formula]
+        tokens = [max(t, math.ceil(f)) for t, f in zip(formula,c['minimum_billable_tokens'])]
         rate = c['pricing']['rates'][c['resolution']][int(bool(seconds))]
         amounts = [round(t * rate / 1000000, 6) for t in tokens]
         self.assertEqual(c['formula_tokens'], formula)

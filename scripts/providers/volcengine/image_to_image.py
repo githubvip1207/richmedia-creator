@@ -315,8 +315,6 @@ def calculate_cost(compiled, context=None, pricing=None, fx=None):
         not set(ctx)
         - {
             "output_dimensions",
-            "minimum_billable_tokens",
-            "minimum_tokens_source",
             "target_asset_index",
         },
         "Unknown estimate_context fields",
