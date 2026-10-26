@@ -103,13 +103,13 @@ description: 生成和编辑图片与视频。支持文生图、图生图、图�
       "purpose": "待编辑的熊猫图片，保留熊猫外观，只修改背景" // 必需：素材用途，只在这里记录一次
     }
   ],
+  // 引用 assets 中目标视频的 id；多视频编辑/延长时必填，单视频可省略，其他任务不填写（本例省略）。
+  // 值须与估价、提交 JSON 顶层的 target_asset_id 一致。
+  // "target_asset_id": "main-video",
   "providers": { // 必需：以实际候选供应商标识为键
     "volcengine": {
       "model": "doubao-seedream-5-0-flash-260915", // 必需：该供应商的模型别名或准确 ID
       "operation": "image-to-image", // 必需：该供应商支持的能力，与 intent.operation 对应
-      // 引用顶层 assets 中目标视频的 id；多视频编辑/延长时必填，单视频可省略，其他任务删除（本例删除）。
-      // 值须与估价、提交 JSON 顶层的 target_asset_id 一致。
-      "target_asset_id": "main-video",
       "parameters": { // 必需：按供应商能力要求整理已确定的参数
         "size": "1K", // 本例输出尺寸档位
         "ratio": "1:1" // 本例构图比例

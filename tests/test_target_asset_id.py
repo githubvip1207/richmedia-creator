@@ -74,12 +74,27 @@ class TargetAssetId(unittest.TestCase):
                     consume_quote(changed,quote)
                 removed=copy.deepcopy(spec);removed.pop('target_asset_id')
                 with self.assertRaises(ValueError):consume_quote(removed,quote)
-                record=store.read(work/'request.json');record['providers'][provider]['target_asset_id']='source'
+                record=store.read(work/'request.json');record['target_asset_id']='source'
                 store.write(work/'request.json',record)
                 from providers import get_capability
                 capability=get_capability(provider,spec['operation'])
                 with patch.object(capability,'submit') as post, self.assertRaisesRegex(ValueError,'target_asset_id differs'):
                     submit.submit(work,spec,'TEST')
+                post.assert_not_called()
+
+    def test_provider_scoped_target_does_not_replace_task_target(self):
+        for provider in ('volcengine', 'byteplus'):
+            with self.subTest(provider=provider), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                spec = self.spec(provider)
+                prepare(work, spec)
+                record = store.read(work / 'request.json')
+                record['providers'][provider]['target_asset_id'] = record.pop('target_asset_id')
+                store.write(work / 'request.json', record)
+                from providers import get_capability
+                capability = get_capability(provider, spec['operation'])
+                with patch.object(capability, 'submit') as post, self.assertRaisesRegex(ValueError, 'target_asset_id differs'):
+                    submit.submit(work, spec, 'TEST')
                 post.assert_not_called()
 
     def test_both_suppliers_submit_id_only_as_local_audit_field(self):

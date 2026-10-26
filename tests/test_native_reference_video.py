@@ -82,13 +82,12 @@ def prepare(work, spec):
     selected = {'model': spec['payload']['model'], 'operation': spec['operation'], 'mode': spec['mode'],
                 'parameters': {k: spec['payload'][k] for k in ('resolution', 'ratio', 'duration', 'generate_audio')},
                 'assets': [{'id': a['id']} for a in spec['assets']]}
-    if 'target_asset_id' in spec:
-        selected['target_asset_id'] = spec['target_asset_id']
     if 'estimate_context' in spec:
         selected['estimate_context'] = spec['estimate_context']
     store.write(work / 'request.json', {'original_prompt': spec['original_prompt'],
                 'optimized_prompt': spec['payload']['content'][0]['text'],
                 'intent': {'operation': spec['operation']}, 'assets': spec['assets'],
+                **({'target_asset_id': spec['target_asset_id']} if 'target_asset_id' in spec else {}),
                 'providers': {spec['provider']: selected}})
     return quote
 

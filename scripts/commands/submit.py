@@ -438,7 +438,7 @@ def validate_requirement(directory, spec, compiled):
         "Submission estimate_context differs from request.json; update the plan and reconfirm",
     )
     require(
-        selected.get("target_asset_id") == spec.get("target_asset_id"),
+        record.get("target_asset_id") == spec.get("target_asset_id"),
         "Submission target_asset_id differs from request.json; update the plan and reconfirm",
     )
     parameters = selected.get("parameters")
