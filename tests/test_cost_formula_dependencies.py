@@ -1,4 +1,4 @@
-"""Formula inputs come from task settings, measured media and explicit billing evidence."""
+"""公式输入来自任务参数、实测媒体信息和明确的计费依据。"""
 import copy
 import math
 import sys
@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from core.media_probe import calculate_asset_inputs
+from providers import calculate_asset_inputs
 from cost_fixture import as_native
-from core.cost_quote import consume_quote
+from providers import consume_quote
 
 
 class FormulaDependencies(unittest.TestCase):
@@ -22,6 +22,10 @@ class FormulaDependencies(unittest.TestCase):
         metadata = {'width':1280,'height':720} if asset['kind'] != 'audio' else {}
         if asset['kind'] == 'image':
             metadata['mime'] = 'image/png'
+        if asset['kind'] in ('video', 'audio'):
+            metadata.update(bytes=200, format_name='mov,mp4' if asset['kind'] == 'video' else 'wav')
+            if asset['kind'] == 'video':
+                metadata.update(codec_name='h264', frame_rate=24)
         if 'portrait' in source:
             metadata.update(width=720,height=1280)
         if 'arbitrary' in source:
@@ -78,8 +82,9 @@ class FormulaDependencies(unittest.TestCase):
         inputs = {**self.base,'operation':'image-to-video', 'ratio':'adaptive',
                   'assets':[self.asset('image','arbitrary')]}
         unknown = calculate_asset_inputs(inputs)
-        self.assertEqual(unknown['result']['status'],'unknown')
-        self.assertIn('estimate_context.output_dimensions',[u['field'] for u in unknown['result']['uncertainties'] if u['field'].startswith('estimate_context.') ])
+        self.assertEqual(unknown['result']['status'],'estimate')
+        self.assertIn('output_dimensions',[u['field'] for u in unknown['result']['uncertainties']])
+        self.assertGreater(unknown['result']['amount']['min'], 0)
         inputs['estimate_context'] = {'output_dimensions':[728,560]}
         quote = calculate_asset_inputs(inputs)
         self.assertEqual(quote['result']['status'],'estimate')
@@ -87,7 +92,7 @@ class FormulaDependencies(unittest.TestCase):
         from test_native_video import request
         spec = request(mode='first-frame')
         spec['assets'] = [{**inputs['assets'][0], 'id': 'frame', 'purpose': '首帧'}]
-        # Cost assets without an id intentionally cannot bind to a submission.
+        # 缺少 id 的计费素材不能与提交请求绑定。
         inputs['assets'][0]['id'] = 'frame'
         quote = calculate_asset_inputs(inputs)
         consume_quote(spec, quote)
@@ -99,7 +104,7 @@ class FormulaDependencies(unittest.TestCase):
     def test_edit_target_and_floor_range_resolve_all_formula_dependencies(self):
         assets=[self.asset('video'),self.asset('video','portrait-long')]
         unknown = self.quote(operation='reference-to-video', mode='edit',ratio='adaptive',duration=-1,assets=assets)
-        self.assertEqual(unknown['result']['status'],'unknown')
+        self.assertEqual(unknown['result']['status'],'estimate')
         context={'target_asset_index':1,'minimum_billable_tokens':[100000,500000],
                  'minimum_tokens_source':'https://docs.volcengine.com/test-fixture'}
         quote=self.quote(operation='reference-to-video', mode='edit',ratio='adaptive',duration=-1,assets=assets,estimate_context=context)
@@ -142,9 +147,9 @@ class FormulaDependencies(unittest.TestCase):
         import json
         import subprocess
         import tempfile
-        from core.request import ROOT
+        from core.catalogs import ROOT
         with tempfile.TemporaryDirectory() as tmp:
-            run = subprocess.run([sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', tmp],
+            run = subprocess.run([sys.executable, str(ROOT/'scripts/main.py'), 'cost', '--workdir', tmp],
                                  input=json.dumps(self.base), capture_output=True, text=True, cwd=tmp)
             self.assertEqual(run.returncode, 0, run.stderr)
             self.assertEqual(json.loads(run.stdout)['result']['status'], 'estimate')

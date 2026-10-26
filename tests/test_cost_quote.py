@@ -1,4 +1,4 @@
-"""Independent quotes, plan consumption and offline CLI integration."""
+"""验证独立报价、提交时复用方案及离线命令行集成。"""
 import copy
 import json
 import subprocess
@@ -10,9 +10,9 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from core import submission_store as store
-from core.cost_quote import consume_quote
+from providers import consume_quote
 from cost_fixture import calculate, as_native
-from core.request import ROOT
+from core.catalogs import ROOT
 
 
 def image():
@@ -29,7 +29,7 @@ class IndependentCosts(unittest.TestCase):
 
     def test_consume_saved_cost_without_recalculation(self):
         spec=image();quote=calculate(spec)
-        with patch('core.cost_quote.estimate',side_effect=AssertionError('Unexpected calculation')):
+        with patch('providers.estimate',side_effect=AssertionError('Unexpected calculation')):
             self.assertEqual(consume_quote(as_native(spec),quote)[3],quote['result'])
         self.assertNotIn('quote_hash',quote)
         self.assertNotIn('catalog_hash',quote)
@@ -71,25 +71,26 @@ class IndependentCosts(unittest.TestCase):
         cost = self.root/'volcengine-priceing.json'
         inputs = {'provider': 'volcengine', 'model': 'seedream-5.0-flash',
                   'operation': 'text-to-image', 'size': '1K'}
-        result = run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        result = run('main.py', 'cost', '--workdir', self.root, input_data=inputs)
         data = store.read(cost)
         self.assertEqual({k: json.loads(result.stdout)[k] for k in ('input','calculation','result')}, data)
-        self.assertEqual(Path(json.loads(result.stdout)['quote']).resolve(), cost.resolve())
+        self.assertEqual(Path(json.loads(result.stdout)['cost_file']).resolve(), cost.resolve())
+        self.assertEqual(set(json.loads(result.stdout)), {'cost_file', 'input', 'calculation', 'result'})
         self.assertEqual(data['input'], inputs)
         self.assertEqual(data['result']['currency'], 'CNY')
         self.assertNotIn('prompt', data['input'])
-        # The fixed output filename is updated when inputs change.
+        # 输入发生变化时，更新同名输出文件。
         inputs['size'] = '2K'
-        run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        run('main.py', 'cost', '--workdir', self.root, input_data=inputs)
         self.assertEqual(store.read(cost)['input']['size'], '2K')
         inputs['size'] = '1K'
-        run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        run('main.py', 'cost', '--workdir', self.root, input_data=inputs)
         inputs['provider'] = 'byteplus'
-        run('main.py', 'estimate-cost', '--workdir', self.root, input_data=inputs)
+        run('main.py', 'cost', '--workdir', self.root, input_data=inputs)
         self.assertEqual(store.read(self.root/'byteplus-priceing.json')['result']['currency'], 'USD')
 
     def test_cli_text_video_quotes_for_both_suppliers(self):
-        args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]
+        args = [sys.executable, str(ROOT/'scripts/main.py'), 'cost', '--workdir', str(self.root)]
         for provider in ('volcengine', 'byteplus'):
             inputs = {'provider': provider, 'model': 'seedance-2.0', 'operation': 'text-to-video',
                       'resolution': '480p', 'ratio': '16:9', 'duration': 4}
@@ -99,7 +100,7 @@ class IndependentCosts(unittest.TestCase):
             self.assertTrue((self.root/(provider + '-priceing.json')).exists())
 
     def test_stdin_invalid_json_creates_no_cost_file(self):
-        args = [sys.executable, str(ROOT/'scripts/main.py'), 'estimate-cost', '--workdir', str(self.root)]
+        args = [sys.executable, str(ROOT/'scripts/main.py'), 'cost', '--workdir', str(self.root)]
         for raw in ['', '{', '[]', '{"provider":"volcengine","model":"seedream-5.0-flash","operation":"text-to-image","size":"1K","input_images":NaN}',
                     '{"provider":"volcengine","model":"seedream-5.0-flash","operation":"text-to-image","size":"1K","typo":1}']:
             result = subprocess.run(args, cwd=self.root, capture_output=True, text=True, input=raw)

@@ -1,4 +1,4 @@
-"""Run initialization is local, atomic, private and does not invent task content."""
+"""任务初始化在本地原子执行，使用私有权限，不虚构任务内容。"""
 import datetime as dt
 import json
 from pathlib import Path
@@ -47,7 +47,7 @@ class WorkspaceTests(unittest.TestCase):
         first = init_command.initialize('{"original_prompt":"测试需求"}')
         request = Path(first['workdir']) / 'request.json'
         request.write_text('existing user requirements')
-        # A symlink collision must also be skipped without following it.
+        # 符号链接发生路径冲突时也须跳过，不跟随链接。
         (self.root / 'richmedia-20261022163046').symlink_to(Path(first['workdir']), target_is_directory=True)
         second = init_command.initialize('{"original_prompt":"测试需求"}')
         self.assertEqual(Path(second['workdir']).name, 'richmedia-20261022163047')

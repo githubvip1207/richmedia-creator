@@ -11,12 +11,13 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from commands import submit as submit_command
 from commands import check as check_command, doctor as doctor_command
-from core import dependencies
+from core import dependencies, exchange_rate
 from core import envfile, submission_store as store
 from cost_fixture import save_with_cost
-from core.request import compile_request
-from core.cost_formula import estimate
-from providers import configured, volcengine
+from providers import compile_request
+from providers import estimate
+from providers import configured
+from providers.volcengine import client as volcengine
 
 
 class PreflightTests(unittest.TestCase):
@@ -38,7 +39,7 @@ class PreflightTests(unittest.TestCase):
     def test_check_is_read_only_and_hides_keys(self):
         self.path.write_text('BYTEPLUS_API_KEY=secret-test-value\n')
         original = self.path.read_bytes()
-        with patch.object(doctor_command.urllib.request, 'urlopen') as net, patch.object(doctor_command.subprocess, 'run') as installer:
+        with patch.object(exchange_rate.urllib.request, 'urlopen') as net, patch.object(dependencies.subprocess, 'run') as installer:
             result = check_command.check()
             net.assert_not_called()
             installer.assert_not_called()
@@ -49,14 +50,14 @@ class PreflightTests(unittest.TestCase):
     def test_expired_invalid_and_valid_fx(self):
         for date, status in [('2000-01-01T00:00:00Z', 'expired'), ('not-a-date', 'invalid'), ('2099-01-01T00:00:00+08:00', 'ok')]:
             self.path.write_text('USD_CNY=7\nUSD_CNY_EXPIRES_AT='+date+'\n')
-            self.assertEqual(envfile.fx_state()['status'], status)
-            self.assertEqual(envfile.fx_from_env() is not None, status == 'ok')
+            self.assertEqual(exchange_rate.fx_state()['status'], status)
+            self.assertEqual(exchange_rate.fx_from_env() is not None, status == 'ok')
         self.path.write_text('USD_CNY=NaN\nUSD_CNY_EXPIRES_AT=2099-01-01T00:00:00Z\n')
-        self.assertEqual(envfile.fx_state()['status'], 'invalid')
+        self.assertEqual(exchange_rate.fx_state()['status'], 'invalid')
 
     def test_update_preserves_config_comments_and_crlf(self):
         self.path.write_bytes(b'# settings\r\nBYTEPLUS_API_KEY=private\r\nUSD_CNY=1 # cached\r\nOTHER=x\r\n')
-        doctor_command.save_exchange_rate(7.1, '2099-01-01T00:00:00+00:00')
+        exchange_rate.save_exchange_rate(7.1, '2099-01-01T00:00:00+00:00')
         data = self.path.read_bytes()
         self.assertIn(b'BYTEPLUS_API_KEY=private\r\n', data)
         self.assertIn(b'USD_CNY=7.1 # cached\r\n', data)
@@ -66,16 +67,16 @@ class PreflightTests(unittest.TestCase):
     def test_rate_update_uses_fixed_pair_and_data_date(self):
         date = dt.datetime.now(dt.timezone.utc).date()
         reply = {'base': 'USD', 'quote': 'CNY', 'date': date.isoformat(), 'rate': 7.1}
-        with patch.object(doctor_command.urllib.request, 'urlopen', return_value=io.BytesIO(json.dumps(reply).encode())) as net:
-            result = doctor_command.update_exchange_rate()
-        self.assertEqual(net.call_args.args[0].full_url, envfile.FX_URL)
-        self.assertEqual(envfile.fx_from_env()['usd_cny'], 7.1)
-        self.assertEqual(envfile.parse_expiry(result['expires_at']).date(), date+dt.timedelta(days=7))
+        with patch.object(exchange_rate.urllib.request, 'urlopen', return_value=io.BytesIO(json.dumps(reply).encode())) as net:
+            result = exchange_rate.update_exchange_rate()
+        self.assertEqual(net.call_args.args[0].full_url, exchange_rate.FX_URL)
+        self.assertEqual(exchange_rate.fx_from_env()['usd_cny'], 7.1)
+        self.assertEqual(exchange_rate.parse_expiry(result['expires_at']).date(), date+dt.timedelta(days=7))
 
     def test_bad_network_preserves_original(self):
         self.path.write_text('USD_CNY=7\nUSD_CNY_EXPIRES_AT=2000-01-01T00:00:00Z\n')
         original = self.path.read_bytes()
-        with patch.object(doctor_command.urllib.request, 'urlopen', side_effect=OSError('private-url')):
+        with patch.object(exchange_rate.urllib.request, 'urlopen', side_effect=OSError('private-url')):
             result = doctor_command.doctor(exchange_rate=True)
         self.assertEqual(result['repairs'][0]['status'], 'failed')
         self.assertEqual(self.path.read_bytes(), original)
@@ -86,9 +87,9 @@ class PreflightTests(unittest.TestCase):
         for changes in [{'quote':'EUR'}, {'date':'2000-01-01'}, {'date':(date+dt.timedelta(days=1)).isoformat()}, {'rate':-1}, {'rate':float('inf')}]:
             reply = {'base':'USD','quote':'CNY','date':date.isoformat(),'rate':7}
             reply.update(changes)
-            with patch.object(doctor_command.urllib.request, 'urlopen', return_value=io.BytesIO(json.dumps(reply).encode())):
+            with patch.object(exchange_rate.urllib.request, 'urlopen', return_value=io.BytesIO(json.dumps(reply).encode())):
                 with self.assertRaises(ValueError):
-                    doctor_command.update_exchange_rate()
+                    exchange_rate.update_exchange_rate()
             self.assertFalse(self.path.exists())
 
     def test_dependencies_install_and_recheck(self):
@@ -100,14 +101,14 @@ class PreflightTests(unittest.TestCase):
             if command[0] == 'npx': skill['ready'] = True
             if command[0] == 'brew': available['ffprobe']='/ffprobe'
             return True
-        with patch.object(dependencies, 'skill_status', side_effect=lambda:{'status':'ok' if skill['ready'] else 'missing'}), patch.object(dependencies.shutil,'which',side_effect=available.get), patch.object(doctor_command, 'run_installer',side_effect=install):
-            result=doctor_command.repair_dependencies()
+        with patch.object(dependencies, 'skill_status', side_effect=lambda:{'status':'ok' if skill['ready'] else 'missing'}), patch.object(dependencies.shutil,'which',side_effect=available.get), patch.object(dependencies, 'run_installer',side_effect=install):
+            result=dependencies.repair_dependencies()
         self.assertEqual([r['status'] for r in result], ['repaired','repaired'])
         self.assertEqual(calls[-1], ['brew','install','ffmpeg'])
 
     def test_dependency_missing_installers(self):
         with patch.object(dependencies, 'skill_status',return_value={'status':'missing'}), patch.object(dependencies.shutil,'which',return_value=None):
-            results=doctor_command.repair_dependencies()
+            results=dependencies.repair_dependencies()
         self.assertEqual([r['status'] for r in results], ['failed','failed'])
 
     def test_unreadable_or_empty_skill_not_accepted(self):

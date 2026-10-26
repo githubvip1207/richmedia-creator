@@ -1,4 +1,4 @@
-"""Shared image editing validation: real files and no paid API requests."""
+"""共用图片编辑校验：使用真实文件，不发起付费 API 请求。"""
 import base64
 import hashlib
 import json
@@ -11,9 +11,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from core import assets
-from core.media_probe import calculate_asset_inputs
-from core.request import compile_request, validate_edit_coordinates
+from core import asset_inspect, media_base64, payload_size
+from providers import calculate_asset_inputs
+from providers import compile_request
+from providers.volcengine.image_to_image import validate_edit_coordinates
 from test_document_contract import image
 from test_runtime import png
 
@@ -38,7 +39,7 @@ class ImageEditingValidation(unittest.TestCase):
                     'id': '0', 'kind': 'image', 'source': str(source), 'purpose': 'reference'}])
                 spec['payload']['model'] = prefix+'-seedream-5-0-flash-260915'
                 compiled = compile_request(spec, quote['calculation']['assets'])
-                value = assets.materialize(compiled['assets'][0])
+                value = media_base64.materialize(compiled['assets'][0])
                 self.assertTrue(value.startswith('data:image/png;base64,'))
                 self.assertEqual(base64.b64decode(value.split(',', 1)[1]), png())
 
@@ -51,30 +52,30 @@ class ImageEditingValidation(unittest.TestCase):
             with self.subTest(provider=provider), self.assertRaisesRegex(ValueError, 'Unsupported input image format'):
                 calculate_asset_inputs(self.cost_input(provider, source))
         with self.assertRaisesRegex(ValueError, 'Unsupported input image format'):
-            assets.inspect_asset({'kind': 'image', 'source': str(source), 'purpose': 'reference'})
+            asset_inspect.inspect_asset({'kind': 'image', 'source': str(source), 'purpose': 'reference'})
 
     def test_materialize_hashes_and_encodes_same_bytes(self):
         source = self.root/'source.png';source.write_bytes(png())
-        asset = assets.inspect_asset({'kind': 'image', 'source': str(source), 'purpose': 'reference'})
+        asset = asset_inspect.inspect_asset({'kind': 'image', 'source': str(source), 'purpose': 'reference'})
         real_sha256 = hashlib.sha256
         def change_after_hash(data):
             digest = real_sha256(data)
             source.write_bytes(png()+b'changed during submission')
             return digest
-        with patch.object(assets.hashlib, 'sha256', side_effect=change_after_hash):
-            encoded = assets.materialize(asset)
+        with patch.object(media_base64.hashlib, 'sha256', side_effect=change_after_hash):
+            encoded = media_base64.materialize(asset)
         self.assertEqual(base64.b64decode(encoded.split(',', 1)[1]), png())
         self.assertNotEqual(source.read_bytes(), png())
 
     def test_oversized_base64_batch_is_rejected_before_quote(self):
         source = self.root/'source.png';source.write_bytes(png()+bytes(25*1024*1024))
         for provider in ('volcengine', 'byteplus'):
-            with self.subTest(provider=provider), patch('core.cost_quote.calculate_inputs') as price:
+            with self.subTest(provider=provider), patch('providers.'+provider+'.image_to_image.calculate_inputs') as price:
                 with self.assertRaisesRegex(ValueError, '64 MB after Base64'):
                     calculate_asset_inputs(self.cost_input(provider, source, 2))
                 price.assert_not_called()
-        # The same individually valid inputs fit when passed as URLs.
-        assets.validate_image_request_size([{'source': 'https://example.com/a.png'},
+        # 同样的素材改用 URL 传递时，请求总大小符合限制。
+        payload_size.validate_image_request_size([{'source': 'https://example.com/a.png'},
                                             {'source': 'https://example.com/b.png'}])
 
     def test_preflight_matches_actual_json_size_with_mixed_sources(self):
@@ -83,8 +84,8 @@ class ImageEditingValidation(unittest.TestCase):
         template = {'prompt': '中文提示词', 'image': []}
         actual = {**template, 'image': ['data:image/png;base64,'+base64.b64encode(bytes(11)).decode(), items[1]['source']]}
         expected = len(json.dumps(actual, ensure_ascii=False).encode())
-        with patch.object(assets.json, 'dumps', wraps=json.dumps) as dumps:
-            assets.validate_image_request_size(items, template)
+        with patch.object(payload_size.json, 'dumps', wraps=json.dumps) as dumps:
+            payload_size.validate_image_request_size(items, template)
         skeleton = dumps.call_args.args[0]
         self.assertEqual(len(json.dumps(skeleton, ensure_ascii=False).encode())+16, expected)
         self.assertEqual(template['image'], [])

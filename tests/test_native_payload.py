@@ -1,4 +1,4 @@
-"""Native image requests preserve the approved API body through submission."""
+"""原生图片请求在提交过程中保留已批准的 API 正文。"""
 import copy
 import sys
 import tempfile
@@ -7,10 +7,10 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from commands import submit as submit_command, deliver as download_command
-from core.request import compile_request
+from providers import compile_request
 from cost_fixture import calculate, save_with_cost
 from core import submission_store as store
-from providers import volcengine
+from providers.volcengine import client as volcengine
 from config_fixture import config_fixture
 
 

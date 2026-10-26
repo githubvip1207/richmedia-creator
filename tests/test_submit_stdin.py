@@ -1,4 +1,4 @@
-"""Submit accepts inline JSON without requiring an intermediate request file."""
+"""提交命令接受内联 JSON，无需先创建中间请求文件。"""
 import importlib.util
 import io
 import json
@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from core.request import ROOT
+from core.catalogs import ROOT
 
 
 class SubmitStdin(unittest.TestCase):

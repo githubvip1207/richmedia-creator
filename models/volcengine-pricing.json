@@ -1,59 +1,59 @@
 {
-  "verified_on": "2026-10-21",
+  "verified_on": "2026-10-25",
   "source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh",
   "currency": "CNY",
   "basis": "公开刊例价，不含资源包、账户优惠及版权IP附加费；video按每百万Token计价，数组依次为无视频输入、有视频输入；image按张及像素档位计价，single/layer数组依次为低像素档、高像素档，input_after_first为首张之后每张输入图单价",
   "video": {
     "seedance-2.5": {
       "480p": [
-        70,
-        42
+        70.0,
+        42.0
       ],
       "720p": [
-        70,
-        42
+        70.0,
+        42.0
       ],
       "1080p": [
-        77,
-        46
+        77.0,
+        46.0
       ]
     },
     "seedance-2.0": {
       "480p": [
-        46,
-        28
+        46.0,
+        28.0
       ],
       "720p": [
-        46,
-        28
+        46.0,
+        28.0
       ],
       "1080p": [
-        51,
-        31
+        51.0,
+        31.0
       ],
       "4k": [
-        26,
-        16
+        26.0,
+        16.0
       ]
     },
     "seedance-2.0-fast": {
       "480p": [
-        37,
-        22
+        37.0,
+        22.0
       ],
       "720p": [
-        37,
-        22
+        37.0,
+        22.0
       ]
     },
     "seedance-2.0-mini": {
       "480p": [
-        23,
-        14
+        23.0,
+        14.0
       ],
       "720p": [
-        23,
-        14
+        23.0,
+        14.0
       ]
     }
   },
@@ -82,5 +82,6 @@
       ],
       "threshold_pixels": 2610000
     }
-  }
+  },
+  "verification_source": "https://console.volcengine.com/ark/region:cn-beijing/docs/model-pricing.md"
 }

@@ -1,4 +1,4 @@
-"""Offline video contract and lifecycle tests. Supplier calls are always mocked."""
+"""视频原生接口约定及完整流程的离线测试；供应商调用全部使用模拟对象。"""
 import copy
 import json
 import shutil
@@ -9,13 +9,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from core.request import compile_request, CATALOGS
-from core.cost_quote import consume_quote
-from core.media_probe import calculate_asset_inputs
+from providers import compile_request
+from core.catalogs import CATALOGS
+from providers import consume_quote
+from providers import calculate_asset_inputs
+from core import media_validate
 from core import submission_store as store
 from commands import submit, status, deliver
-from providers import volcengine, byteplus
-from providers.transport import payload, ProviderError
+from providers.volcengine import client as volcengine
+from providers.byteplus import client as byteplus
+from core.payload import payload
+from core.http import ProviderError
 from config_fixture import config_fixture
 
 
@@ -200,10 +204,10 @@ class NativeVideo(unittest.TestCase):
             quote = prepare(Path(tmp), spec)
             self.assertLess(quote['result']['amount']['min'], quote['result']['amount']['max'])
             assets = measured(spec); assets[0]['metadata']['width'] = 1234
-            from core.cost_quote import calculate_inputs
+            from providers import calculate_inputs
             quote = calculate_inputs({'provider':'byteplus','model':'seedance-2.5','operation':'image-to-video',
                     'resolution':'480p','ratio':'adaptive','duration':4,'input_images':1}, measured_assets=assets)
-            self.assertEqual(quote['result']['status'], 'unknown')
+            self.assertEqual(quote['result']['status'], 'estimate')
 
     def test_frame_count_infers_roles_without_mode_and_ratio_is_fixed(self):
         for provider in ('volcengine','byteplus'):
@@ -316,7 +320,9 @@ class NativeVideo(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             work = Path(tmp); spec = request(model='seedance-2.0',mode='first-frame')
             quote = prepare(work,spec)
-            self.assertEqual(quote['result']['status'], 'unknown')
+            self.assertEqual(quote['result']['status'], 'estimate')
+            quote['result'].update(status='unknown', amount={'min':None,'max':None})
+            store.write(work / 'volcengine-priceing.json', quote)
             with config_fixture({'VOLCENGINE_API_KEY':'fixture'}), patch('commands.submit.require_dependencies'), \
                     patch.object(volcengine,'request',return_value={'id':'task'}) as post:
                 with self.assertRaisesRegex(ValueError, 'unknown'):
@@ -331,9 +337,9 @@ class NativeVideo(unittest.TestCase):
             work = Path(tmp)/'task'; work.mkdir(); video = work/'fixture.mp4'
             subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=blue:s=320x320:r=24',
                             '-t','0.25','-c:v','libx264','-pix_fmt','yuv420p',str(video)], check=True)
-            self.assertTrue(deliver.valid_media(video, 'video'))
+            self.assertTrue(media_validate.valid_media(video, 'video'))
             bad = work/'bad.mp4'; bad.write_bytes(b'\x00\x00\x00\x18ftypisom' + b'\0'*30)
-            self.assertFalse(deliver.valid_media(bad, 'video'))
+            self.assertFalse(media_validate.valid_media(bad, 'video'))
             spec = request(); prepare(work, spec)
             with config_fixture({'VOLCENGINE_API_KEY':'fixture'}), patch('commands.submit.require_dependencies'), \
                     patch.object(volcengine,'request',return_value={'id':'task'}):
@@ -341,7 +347,7 @@ class NativeVideo(unittest.TestCase):
             reply = {'id':'task','status':'succeeded','content':{'video_url':'https://example.com/a.mp4'}}
             dest = Path(tmp)/'delivered'; dest.mkdir()
             with patch.object(volcengine,'status',return_value=reply), \
-                    patch.object(deliver,'download_url',side_effect=lambda url,path:shutil.copyfile(video,path)) as download:
+                    patch('core.download.download_url',side_effect=lambda url,path:shutil.copyfile(video,path)) as download:
                 result = deliver.deliver(state['submission'], dest)
                 again = deliver.deliver(state['submission'], dest)
             self.assertEqual(result['files'], again['files']); download.assert_called_once()

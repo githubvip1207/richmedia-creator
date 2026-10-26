@@ -6,5 +6,5 @@ from unittest.mock import patch
 def config_fixture(values, clear=False):
     def value(key):
         return values.get(key)
-    with patch('providers.config_value', side_effect=value), patch('providers.transport.config_value', side_effect=value), patch('commands.submit.config_value', side_effect=value), patch('commands.submit.require_dependencies'):
+    with patch('providers.config_value', side_effect=value), patch('core.http.config_value', side_effect=value), patch('commands.submit.config_value', side_effect=value), patch('commands.submit.require_dependencies'):
         yield

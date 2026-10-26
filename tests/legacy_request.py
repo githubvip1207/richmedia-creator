@@ -1,12 +1,13 @@
-"""Internal validation for planned capabilities and old offline fixtures.
+"""为历史能力方案和旧版离线测试数据提供内部校验。
 
-Not a submission entry point. New submissions require provider-native payloads.
+此模块不是提交入口；新提交必须使用供应商原生请求正文。
 """
 import copy
 import re
-from .request import require, number, CATALOGS, RATIOS
-from .assets import inspect_asset
-from .operations import internal_operation
+from core.validation import require, number
+from core.catalogs import CATALOGS, RATIOS
+from core.asset_inspect import inspect_asset
+from core.operations import internal_operation
 from providers import resolve_provider
 
 # 校验顶层字段、供应商模型、操作、提示词及素材，随后分别编译视频或图片请求。
@@ -14,7 +15,7 @@ from providers import resolve_provider
 def compile_request(spec, measured_assets=None):
     require(isinstance(spec, dict), 'Request must be an object')
     if 'payload' in spec:
-        from .request import compile_request as compile_native
+        from providers import compile_request as compile_native
         return compile_native(spec, measured_assets)
     # 先拒绝未知顶层字段，避免忽略拼写错误或把未审查参数送至供应商。
     unknown = set(spec) - {'provider', 'model', 'operation', 'mode', 'prompt', 'original_prompt', 'parameters',
@@ -117,7 +118,7 @@ def compile_request(spec, measured_assets=None):
         payload = {'model': m['id'], 'content': content, **{k:v for k,v in p.items() if v is not None}}
         if alias != 'seedance-2.5':
             # 2.0 输出固定为 MP4；确认单可说明格式，但请求不能携带其不支持的字段。
-            payload.pop('output_format', None)  # 2.0 format is fixed MP4, no API parameter.
+            payload.pop('output_format', None)  # 2.0 系列输出固定为 MP4，不传递格式参数。
     else:
         # 图片参数路径：禁止原生组图等不受支持字段，输出一次请求始终为一张。
         allowed = {'size', 'ratio', 'output_format', 'response_format', 'watermark', 'background', 'optimize_prompt_options'}
@@ -180,7 +181,7 @@ def compile_request(spec, measured_assets=None):
         if a:
             payload['image'] = [{'asset_index': i} for i in range(len(a))]
     # 只对已有事实做离线边界检查；缺少远程尺寸时留警告，不把未测事实当作通过。
-    # Validate facts available without fetching remote media; absent remote facts stay visible warnings.
+    # 仅校验无需获取远程媒体即可确认的事实；缺失的远程信息保留为明确警告。
     for x in a:
         meta = x['metadata']
         for k in ('width', 'height', 'bytes'):

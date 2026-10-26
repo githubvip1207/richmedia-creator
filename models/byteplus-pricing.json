@@ -1,5 +1,5 @@
 {
-  "verified_on": "2026-10-21",
+  "verified_on": "2026-10-25",
   "source": "https://docs.byteplus.com/en/docs/modelark/model-pricing",
   "currency": "USD",
   "basis": "BytePlus public list price in USD; excludes account discounts, storage, licensed IP and payment/FX charges; video: per million tokens, arrays ordered as without/with input video; image: per image and pixel tier, single/layer arrays ordered as low/high pixel tier, input_after_first is the rate per input image after the first",
@@ -42,16 +42,16 @@
       ],
       "1080p": [
         11.7,
-        7
+        7.0
       ]
     },
     "seedance-2.0": {
       "480p": [
-        7,
+        7.0,
         4.3
       ],
       "720p": [
-        7,
+        7.0,
         4.3
       ],
       "1080p": [
@@ -59,7 +59,7 @@
         4.7
       ],
       "4k": [
-        4,
+        4.0,
         2.4
       ]
     },
@@ -83,5 +83,6 @@
         2.1
       ]
     }
-  }
+  },
+  "verification_source": "https://ai.byteplus.com/ark/region:ap-southeast-1/docs/model-pricing.md"
 }

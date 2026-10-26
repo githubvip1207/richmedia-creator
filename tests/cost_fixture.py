@@ -1,9 +1,10 @@
-"""Offline request/quote fixtures; no real credentials or network calls."""
+"""离线请求与报价测试数据，不使用真实凭证或网络请求。"""
 import copy
 from core import submission_store as store
-from core.cost_quote import billing_inputs, calculate_inputs
-from core.request import compile_request
-from core.legacy_request import compile_request as compile_legacy
+from core.cost_quote import billing_inputs
+from providers import calculate_inputs
+from providers import compile_request
+from legacy_request import compile_request as compile_legacy
 
 
 def as_native(spec):
@@ -12,7 +13,7 @@ def as_native(spec):
     compiled = compile_legacy(spec)
     body = copy.deepcopy(compiled['payload_template'])
     if compiled['operation'] == 'text-to-image':
-        # New submissions preserve the prompt verbatim; legacy additions are not carried forward.
+        # 新提交原样保留提示词，不沿用旧版编译器追加的内容。
         body['prompt'] = spec['prompt']
         body.pop('optimize_prompt_options', None)
     if compiled['assets']:
@@ -54,7 +55,7 @@ def save_with_cost(spec, out, pricing=None):
     native = as_native(spec)
     store.write(out/(spec['provider']+'-priceing.json'), quote)
     save_requirement(native, out, compiled if 'payload' not in spec else None)
-    # Store exactly the prompt the native body submits, not the legacy compiler's appended text.
+    # 准确保存原生请求正文实际提交的提示词，不保存旧版编译器追加的文本。
     record = store.read(out/'request.json')
     record['optimized_prompt'] = native['payload'].get('prompt', next((x['text'] for x in native['payload'].get('content',[]) if x['type']=='text'), ''))
     store.write(out/'request.json', record)

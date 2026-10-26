@@ -1,4 +1,4 @@
-"""Regression checks for the documented CLI contract; all paid calls are mocked."""
+"""对文档约定的命令行接口执行回归检查；全部付费调用均使用模拟对象。"""
 import copy
 import importlib.util
 import io
@@ -14,8 +14,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command, deliver as download_command
 from core import dependencies
 from core import submission_store as store
-from core.request import compile_request, ROOT
-from providers import volcengine, byteplus
+from providers import compile_request
+from core.catalogs import ROOT
+from providers.volcengine import client as volcengine
+from providers.byteplus import client as byteplus
 from config_fixture import config_fixture
 from cost_fixture import save_with_cost
 from test_runtime import png
@@ -171,7 +173,7 @@ class DocumentContract(unittest.TestCase):
         record=store.read(state['submission'])
         record['result']={'files':[{'path':str(file),'sha256':download_command.sha256_file(file)}]}
         store.write(state['submission'],record)
-        with patch.object(download_command, 'download_url') as get:
+        with patch('core.download.download_url') as get:
             result=download_command._download(state['submission'])
         get.assert_not_called()
         self.assertEqual(Path(result['files'][0]['path']).resolve(),file.resolve())
@@ -180,12 +182,12 @@ class DocumentContract(unittest.TestCase):
         module=importlib.util.spec_from_file_location('contract_cli',ROOT/'scripts/main.py')
         cli=importlib.util.module_from_spec(module);module.loader.exec_module(cli)
         inputs={'provider':'volcengine','model':'seedream-5.0-flash','operation':'text-to-image','size':'1K'}
-        with patch.object(sys,'argv',['main.py','estimate-cost','--workdir',str(self.work)]), \
+        with patch.object(sys,'argv',['main.py','cost','--workdir',str(self.work)]), \
                 patch.object(sys,'stdin',io.StringIO(json.dumps(inputs))), patch.object(cli,'emit') as emit:
             cli.main()
         result=emit.call_args.args[0]
-        self.assertEqual(Path(result['quote']).resolve(),(self.work/'volcengine-priceing.json').resolve())
-        self.assertEqual(store.read(result['quote']),{k:result[k] for k in ('input','calculation','result')})
+        self.assertEqual(Path(result['cost_file']).resolve(),(self.work/'volcengine-priceing.json').resolve())
+        self.assertEqual(store.read(result['cost_file']),{k:result[k] for k in ('input','calculation','result')})
 
     def test_documented_cli_lifecycle_for_both_suppliers(self):
         from commands import init as init_command
@@ -205,16 +207,16 @@ class DocumentContract(unittest.TestCase):
                              'providers':{provider:{'model':'seedream-5.0-flash','operation':'text-to-image',
                                                    'parameters':{'size':'1K','ratio':'1:1'},'assets':[]}}}
                 task=Path(invoke(['init'],requirement)['workdir'])
-                quoted=invoke(['estimate-cost','--workdir',str(task)],
+                quoted=invoke(['cost','--workdir',str(task)],
                               {'provider':provider,'model':'seedream-5.0-flash','operation':'text-to-image','size':'1K'})
-                self.assertTrue(Path(quoted['quote']).is_file())
+                self.assertTrue(Path(quoted['cost_file']).is_file())
                 reply={'data':[{'url':'https://example.com/result.png','output_format':'png'}]}
                 with config_fixture({adapter.KEY_ENV:'fixture-key'}),patch.object(adapter,'request',return_value=reply) as post:
                     submitted=invoke(['submit','--workdir',str(task),'--approval-text','TEST CONFIRMATION'],spec)
                 post.assert_called_once_with('POST','/images/generations',spec['payload'])
                 status=invoke(['status','--submission',submitted['submission']])
                 self.assertEqual(status,{'success':True,'error':None})
-                with patch.object(download_command, 'download_url',side_effect=lambda url,path:path.write_bytes(png())):
+                with patch('core.download.download_url',side_effect=lambda url,path:path.write_bytes(png())):
                     with patch('commands.deliver.Path.cwd',return_value=self.work):
                         downloaded=invoke(['deliver','--submission',submitted['submission']])
                 file=Path(downloaded['files'][0]['path'])

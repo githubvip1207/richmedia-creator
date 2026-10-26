@@ -1,4 +1,4 @@
-"""Submission records remain self-contained through polling and downloads."""
+"""提交记录在轮询和下载过程中始终保留完整信息。"""
 import sys
 import tempfile
 import unittest
@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command, status as status_command, deliver as download_command
 from core import submission_store as store
 from cost_fixture import calculate, save_with_cost
-from providers import volcengine
+from providers.volcengine import client as volcengine
 from config_fixture import config_fixture
 from test_runtime import video
 
@@ -19,7 +19,7 @@ class SubmissionRecord(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.work = Path(self.tmp.name)
         legacy = video()
-        from core.legacy_request import compile_request
+        from legacy_request import compile_request
         self.spec = save_with_cost(legacy, self.work)
         self.record = self.work/'submit-001.json'
         store.write(self.record, {**self.spec, 'response': {'id': 'task-fixture'},
@@ -39,8 +39,8 @@ class SubmissionRecord(unittest.TestCase):
         self.assertTrue(all(q['request']['method'] == 'GET' for q in record['queries']))
         def download(url, path):
             path.write_bytes(b'\x00\x00\x00\x18ftypisom' + bytes(20))
-        with patch.object(download_command, 'download_url', side_effect=download) as get, \
-                patch.object(download_command, 'video_metadata', return_value={'width':1280,'height':720,'duration':4,'has_audio':False}):
+        with patch('core.download.download_url', side_effect=download) as get, \
+                patch('core.media_validate.video_metadata', return_value={'width':1280,'height':720,'duration':4,'has_audio':False}):
             result = download_command._download(self.record)
             result = download_command._download(self.record)
             get.assert_called_once()

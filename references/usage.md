@@ -2,24 +2,19 @@
 
 ## 当前适用范围
 
-本手册用于解释支持的脚本功能和脚本运行指南。所有脚本必须在包含 `.env` 文件的目录运行命令，且要求 Python 3.9 及以上。所有命令始终在启动本技能时的项目目录运行；`$WORK` 是任务文件目录，通过参数传入，不切换到该目录运行命令。将 `SKILL` 设置为实际安装目录：
-
-```bash
-SKILL="$HOME/.codex/skills/richmedia-creator"
-```
+本文档用于解释支持的脚本功能和脚本运行指南。所有脚本必须在包含 `.env` 文件的目录运行命令，且要求 Python 3.9 及以上。所有命令始终在启动本技能时的项目目录运行；`$WORK` 是任务文件目录，仅用于保存本次任务文件，通过参数传入，不切换到该目录运行命令：
 
 ## 命令总表
 
-| 命令 | 输入 | 输出与用途 | 执行环境 |
+| 命令 | 功能描述 | 执行环境 | 详细说明 |
 |---|---|---|---|
-| `init` | 标准输入中的需求 JSON 对象 | 创建临时任务文件目录、构造 `request.json` 文件，返回 `workdir` | 无限制 |
-| `models [--provider volcengine或byteplus]` | 可选供应商标识 | 返回本地模型目录；不验证账户是否有调用权限 | 无限制 |
-| `check` | 无 | 只读检查项目配置、供应商密钥是否已配置、汇率和依赖 | 无限制 |
-| `doctor [--dependencies或--exchange-rate]` | 可选修复范围 | 修复依赖或汇率后重新检查 | 必须沙箱外 |
-| `estimate-cost --workdir "$WORK"` | 标准输入中的成本 JSON 对象 | 保存当前需求的 `{供应商}-priceing.json`，返回 `workdir`、`quote` 及完整成本结果 | 无限制 |
-| `submit --workdir "$WORK" --approval-text '用户实际确认原文'` | 标准输入中的任务 JSON；也可用 `--request` 指定文件 | 提交一次生成请求，返回 `submission` 路径 | 必须沙箱外 |
-| `status --submission "$SUBMISSION"` | 已有提交文件路径 | 检查已有任务的执行状态，返回是否成功及错误原因 | 必须沙箱外 |
-| `deliver --submission "$SUBMISSION"` | 已有提交文件路径 | 获取、校验生成结果，并将最终媒体及图层元数据交付到当前项目目录 | 必须沙箱外 |
+| `init` | 读取需求 JSON，创建任务目录并保存 `request.json`，返回 `workdir` | 无限制 | [初始化与运行目录](#初始化与运行目录) |
+| `check` | 只读检查项目配置、供应商凭证配置状态、汇率和依赖 | 无限制 | [配置与环境检查、修复](#配置与环境检查修复) |
+| `doctor [--dependencies] [--exchange-rate] [--pricing]` | 按指定范围修复依赖、更新汇率或核对价格，并返回检查结果 | 必须沙箱外 | [配置与环境检查、修复](#配置与环境检查修复) |
+| `cost --workdir "$WORK"` | 读取成本 JSON，估算费用并保存供应商报价文件 | 无限制 | [成本计算](#成本计算) |
+| `submit --workdir "$WORK" --approval-text '用户实际确认原文'` | 按已确认方案提交一次生成请求，返回提交记录路径 | 必须沙箱外 | [提交生成](#提交生成) |
+| `status --submission "$SUBMISSION"` | 查询已有任务的执行状态，返回是否成功及错误原因 | 必须沙箱外 | [查看执行状态](#查看执行状态) |
+| `deliver --submission "$SUBMISSION"` | 获取、校验并交付最终媒体和图层元数据到当前项目目录 | 必须沙箱外 | [交付结果](#交付结果) |
 
 表中“必须沙箱外”的命令从首次执行起即使用沙箱外环境，不先在受限沙箱中尝试。通过 `exec_command` 执行时，设置 `sandbox_permissions: "require_escalated"`，并在 `justification` 中说明联网用途。
 
@@ -27,22 +22,101 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 
 统一入口为 `scripts/main.py`，负责参数解析、命令分发和 JSON 输出。每个命令的实现放在 `scripts/commands/` 的同名模块中；Python 模块名将命令中的连字符替换为下划线。
 
-| 命令 | 实现文件 |
-|---|---|
-| `init` | `scripts/commands/init.py` |
-| `models` | `scripts/commands/models.py` |
-| `check` | `scripts/commands/check.py` |
-| `doctor` | `scripts/commands/doctor.py` |
-| `estimate-cost` | `scripts/commands/estimate_cost.py` |
-| `submit` | `scripts/commands/submit.py` |
-| `status` | `scripts/commands/status.py` |
-| `deliver` | `scripts/commands/deliver.py` |
+脚本按“命令 → 供应商 → 能力 → 公共工具”组织。命令均通过 `main.py` 调用，不直接执行模块文件。
 
-`core/` 保存共用逻辑：`submission_store.py` 管理记录和锁，`dependencies.py` 检查依赖，`media_probe.py` 实测计费素材，`cost_quote.py` 组织及核对报价，`cost_formula.py` 计算费用。`providers/` 保存供应商适配和网络传输。命令均通过 `main.py` 调用，不直接执行模块文件。
+```text
+scripts/
+├── main.py                         参数解析、命令分发和 JSON 输出
+├── commands/                       接收命令，组织确认检查、锁和记录保存
+│   ├── check.py / doctor.py         配置检查、依赖修复和汇率更新
+│   ├── init.py                     初始化需求
+│   ├── cost.py            调用选定供应商能力的估价入口，保存报价
+│   ├── submit.py                   核对需求与报价，先记录 submitting，再提交一次
+│   ├── status.py                   根据原提交记录分发查询、限时轮询、保存查询记录
+│   └── deliver.py                  检查状态，调用能力交付，再发布最终文件
+├── providers/
+│   ├── __init__.py                 供应商注册、能力路由、请求与报价编译入口
+│   ├── volcengine/                 火山引擎独立规则
+│   │   ├── client.py               固定地址、独立凭证、请求与查询路径
+│   │   ├── text_to_image.py         文生图
+│   │   ├── image_to_image.py        图生图
+│   │   ├── decompose_layers.py      图层拆分
+│   │   ├── text_to_video.py         文生视频
+│   │   ├── image_to_video.py        图生视频
+│   │   ├── reference_to_video.py    参考生成与视频编辑
+│   │   └── extend_video.py          视频延长
+│   └── byteplus/                   同样按七种能力拆文件，独立维护模型与供应商规则
+│       ├── client.py
+│       └── 同名的七个能力模块
+└── core/                           公共工具，按功能拆文件
+    ├── validation.py               基础条件和数值校验
+    ├── catalogs.py                 读取本地模型目录
+    ├── operations.py               七种能力及模式标识
+    ├── envfile.py                  项目 .env 解析
+    ├── exchange_rate.py            汇率获取、有效性检查、原子更新配置
+    ├── dependencies.py             必需依赖检查和安装
+    ├── process.py                  外部工具执行
+    ├── http.py                     HTTP、认证、防重定向、超时和错误脱敏
+    ├── download.py                 已生成媒体的 GET 下载与有限重试
+    ├── file_io.py                  私有 JSON 读写和原子替换
+    ├── file_lock.py                进程间文件锁
+    ├── file_hash.py                文件 SHA256
+    ├── submission_store.py         提交路径、编号、时间和重复提交保护
+    ├── asset_inspect.py            素材来源和本地文件检查
+    ├── media_format.py             根据文件内容识别图片格式
+    ├── media_base64.py             素材 Base64 编码及编码前哈希核对
+    ├── media_probe.py              ffprobe 测量尺寸、时长、帧率等
+    ├── media_validate.py           验证下载媒体可解码、尺寸及透明通道
+    ├── payload_size.py             编码后请求大小预检
+    ├── payload.py                  按已编译模板回填素材
+    ├── cost_quote.py               通用计费字段提取、报价有效期与一致性核对
+    ├── cost_record.py              通用报价审计结构；不包含供应商计费公式
+    ├── layers.py                   图层几何校验和位置元数据
+    ├── output_files.py             按能力给定的输出项下载、校验并保存缓存清单
+    └── delivery_files.py           防覆盖发布最终文件、核对哈希并保存交付清单
+```
+
+### 能力模块的接口与数据依赖
+
+每个能力模块包含本供应商模型的估价、请求规则、状态判断及输出解析。相同模型名不意味着可以共用另一供应商的模型 ID、价格或凭证。
+
+| 接口 | 输入与职责 | 输出 |
+|---|---|---|
+| `cost(inputs, fx=None)` | 校验该能力及模型的计费参数，调用 `core.media_probe` 测量素材，按本模块公式估价 | `input`、`calculation`、`result` |
+| `compile_request(spec, measured_assets=None)` | 按模型校验生成参数，将外层素材转换为图片或视频模板所需的结构，核对估价时记录的素材 | `compiled`：供应商、能力、模型、参数、素材、提示词和 `payload_template` |
+| `build_payload(compiled)` | 调用公共工具编码本地素材，按模板回填供应商 API 字段 | 最终 API 正文，仅在内存中保留 Base64 |
+| `submit(compiled, payload)` | 使用本供应商客户端执行一次生成 POST | 原始供应商响应；由命令层脱敏、保存 |
+| `response_state(...)` | 按本能力的同步或异步响应规则判断状态 | 本地状态、usage 和错误信息 |
+| `status(record, timeout=None)` | 消费同一份提交记录；图片解析同步响应，视频查询已保存的 `task_id` | 图片状态或视频查询响应；视频由 `response_state` 统一转换 |
+| `deliver(record, record_path)` | 解析该能力的输出项，通过 `core` 获取、校验并保存文件；调用方持有任务锁 | 缓存文件及可选图层元数据清单 |
+
+生命周期的调用与持久化关系：
+
+```text
+cost → 能力.cost → 保存 {供应商}-priceing.json
+                                      ↓ 提交时复用并核对
+submit → 能力.compile_request → 核对 request.json 和报价 → 能力.build_payload
+       → 先保存 submit-NNN.json 的 submitting → 能力.submit
+       → 保存 response、execution.compiled 和视频 task_id
+                                      ↓ 后续始终读取同一提交
+status → 从 execution.compiled 定位供应商和能力 → 能力.status
+       → 保存独立 queries，不覆盖原始 POST response → 更新 execution
+                                      ↓ 成功后交付
+deliver → status → 能力.deliver → core 下载/验证/保存 output-NNN 缓存
+        → core 发布至用户项目目录 → 保存 delivery 和 delivery_complete
+```
+
+`status` 和 `deliver` 不从当前需求、当前默认供应商或新模型配置重新推断任务身份。原有 `request.json`、报价、`submit-NNN.json` 和交付清单结构保持兼容；目录重构前已创建的提交可以继续查询和交付。结果未知时保留原提交，禁止因查询或下载失败自动重发生成。参数补全只执行已确认规则及素材回填；影响生成效果或费用的变更须重新估价和确认。
 
 ## 配置与环境检查、修复
 
 配置按数据读取，不执行 `.env`，不回退读取进程环境变量。缺少密钥时忽略对应供应商；不要将密钥写入任务文件或聊天。
+
+```bash
+python3 "$SKILL/scripts/main.py" check  # 不联网，不验证密钥有效性、模型权限、余额或额度。
+python3 "$SKILL/scripts/main.py" doctor --dependencies  # 尝试通过 npx 安装缺失的 sd25-pe、通过 Homebrew 安装提供 ffprobe 的 FFmpeg，安装工具缺失或修复失败时会报告。
+python3 "$SKILL/scripts/main.py" doctor --exchange-rate # 获取 USD/CNY，仅更新项目 `.env` 中两个汇率配置项。
+```
 
 | 项目 `.env` 配置项 | 用途 |
 |---|---|
@@ -51,16 +125,9 @@ SKILL="$HOME/.codex/skills/richmedia-creator"
 | `USD_CNY` | 1 美元对应的人民币金额 |
 | `USD_CNY_EXPIRES_AT` | 汇率过期时间，使用带时区的 ISO 8601 |
 
-
-```bash
-python3 "$SKILL/scripts/main.py" check  # 不联网，不验证密钥有效性、模型权限、余额或额度。
-python3 "$SKILL/scripts/main.py" doctor --dependencies  # 尝试通过 npx 安装缺失的 sd25-pe、通过 Homebrew 安装提供 ffprobe 的 FFmpeg，安装工具缺失或修复失败时会报告。
-python3 "$SKILL/scripts/main.py" doctor --exchange-rate # 获取 USD/CNY，仅更新项目 `.env` 中两个汇率配置项。
-```
-
 ## 初始化与运行目录
 
-接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `init`：
+接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `init`。脚本将传入的保存到当前 `$WORK` 下的 `request.json`，并返回后续的任务文件目录 `workdir`。
 
 ```bash
 python3 "$SKILL/scripts/main.py" init <<'JSON'
@@ -73,30 +140,38 @@ JSON
 
 ## 成本计算
 
-接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `estimate-cost`分别估价。脚本将各供应商报价分别保存到当前 `$WORK` 下的 `{供应商}-priceing.json`，例如 `volcengine-priceing.json`、`byteplus-priceing.json`，并返回 `workdir`、报价文件绝对路径 `quote` 及 `input`、`calculation`、`result`。记录返回的任务文件目录及报价文件路径，不自行选择目录或覆盖其他需求的记录。
+接收主流程组织的 JSON 对象，去除注释后通过标准输入传给 `cost`分别估价。脚本将各供应商报价分别保存到当前 `$WORK` 下的 `{供应商}-priceing.json`，例如 `volcengine-priceing.json`、`byteplus-priceing.json`。记录返回的报价文件路径以及报价结果。
 
 ```bash
-python3 "$SKILL/scripts/main.py" estimate-cost --workdir "$WORK" <<'JSON'
-<完整 JSON 对象，不含注释> 
+python3 "$SKILL/scripts/main.py" cost --workdir "$WORK" <<'JSON'
+<完整 JSON 对象，不含注释>
 JSON
 
 # 返回如下结果
 {
-    "workdir": "/tmp/richmedia-creator-xxxxxx",
-    "quote": "/tmp/richmedia-creator-xxxxxx/volcengine-priceing.json",
-    "input": {},
-    "calculation": {},
-    "result": {
-      "status": "estimate", # estimate：估算值或范围；lower_bound：仅有费用下界；unknown：金额未知
-      "currency": "CNY",    # 原币币种，确认单展示此币种和金额
-      "amount": {           # 原币金额范围；示例为 Seedream Pro、1K、1 张输入图及 1 张输出图
-          "min": 0.3,       # 费用下界；未知时为 null，不能写成 0
-          "max": 0.3        # 费用上界；null 表示上界未知，不能把下界当总价
+  "cost_file": "/tmp/richmedia-creator-xxxxxx/volcengine-priceing.json", // string；本次保存的成本文件绝对路径，文件包含 input、calculation、result，不包含 cost_file。
+  "input": {}, // 本次成本输入 JSON 的完整副本
+  "calculation": {}, // 采用的计费参数、素材实测数据、价格快照、公式和假设
+  "result": { // 用于展示和确认的费用估算结果。
+    "status": "estimate", // string；当前为 estimate，表示按记录依据估算；不表示生成成功或实际已扣费。
+    "currency": "CNY", // "CNY" | "USD"；估算原币，Volcengine 为 CNY，BytePlus 为 USD。
+    "amount": { // object；所列假设下的原币费用范围，不是供应商保证的收费上下界。
+      "min": 0.3, // number | null；估算范围起点；null 表示未知，不代表免费。
+      "max": 0.3 // number | null；估算范围终点；不是扣款限额；历史报价可能为 null。
+    },
+    "uncertainties": [], // object[]；不确定项，每项 field 为涉及字段，reason 为原因；空数组不表示保证价格准确。
+    "range_is_guaranteed": false, // false；金额范围不是实际收费的保证边界。
+    "estimate_quality": "documented_estimate", // string，可选；视频为 documented_estimate 或 extrapolated，后者含未校准外推；图片通常省略。
+    "conversion": { // object，可选；有有效汇率时返回另一币种的估算；无有效汇率时省略。
+      "currency": "USD", // "CNY" | "USD"；换算目标币种，与上层原币不同。
+      "amount": { // object；换算后的金额范围，币种为 conversion.currency。
+        "min": 0.042857, // number | null；换算后的估算范围起点。
+        "max": 0.042857 // number | null；换算后的估算范围终点，不是扣款限额。
       },
-      "uncertainties": []   # 不确定项数组；每项为 {"field":"缺失或未确定的字段", "reason":"费用不确定的原因"}
-      # 有有效汇率时还包含 conversion：currency 为换算币种，amount 为换算后的 {min,max}，
-      # usd_cny 为 1 美元对应人民币数值，expires_at 为汇率有效期；无有效汇率时不返回此字段。
-      }
+      "usd_cny": 7.0, // number；本次换算采用的 1 美元对应人民币金额，示意值。
+      "expires_at": "2026-10-27T00:00:00+00:00" // string；汇率有效期，带时区的 ISO 8601 时间。
+    }
+  }
 }
 ```
 
@@ -212,3 +287,5 @@ python3 "$SKILL/scripts/main.py" deliver --submission "$SUBMISSION"
 结果交付必须使用 `deliver` 命令，不得另写下载或复制代码绕过该命令。
 
 临时目录可能被系统清理，文件缺失不代表允许再次付费。原始响应及清单可能含临时签名 URL，不将其或 Base64 正文粘贴到聊天中。
+
+成本结果的 `uncertainties`、`scenarios`、`range_is_guaranteed` 及交付中的 `cost_comparison` 见[成本估算与核对](cost-estimation.md)。`doctor --pricing` 只在官方单价完整解析通过后更新对应供应商快照；失败保留原文件和核实日期。

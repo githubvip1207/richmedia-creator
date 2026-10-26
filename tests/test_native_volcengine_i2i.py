@@ -1,4 +1,4 @@
-"""Volcengine reference images: real local probes, mocked paid POST and media GET."""
+"""火山引擎参考图片测试：真实探测本地素材，模拟付费 POST 和媒体 GET。"""
 import copy
 import io
 import json
@@ -10,12 +10,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import init, estimate_cost, submit, status, deliver as download
-from core.request import compile_request
-from core.cost_quote import consume_quote
-from core.media_probe import calculate_asset_inputs
+from commands import init, cost as cost_command, submit, status, deliver as download
+from providers import compile_request
+from providers import consume_quote
+from providers import calculate_asset_inputs
+from core import payload as payload_tools
 from core import submission_store as store
-from providers import volcengine, byteplus, transport
+from providers.volcengine import client as volcengine
+from providers.byteplus import client as byteplus
+from core import http as transport
 from test_document_contract import image
 from test_runtime import png
 from config_fixture import config_fixture
@@ -61,7 +64,7 @@ class VolcengineImageToImage(unittest.TestCase):
         cost_input = {'provider': self.provider, 'model': spec['payload']['model'],
                       'operation': 'image-to-image', 'size': '1K', 'assets': assets}
         with patch('sys.stdin', io.StringIO(json.dumps(cost_input))):
-            estimate_cost.run(SimpleNamespace(workdir=str(work)))
+            cost_command.run(SimpleNamespace(workdir=str(work)))
         return work, spec
 
     def post(self, work, spec, response=None):
@@ -95,7 +98,7 @@ class VolcengineImageToImage(unittest.TestCase):
                 with patch.object(self.adapter, 'status') as query:
                     self.assertTrue(status.run(SimpleNamespace(submission=state['submission'], wait=0))['success'])
                     query.assert_not_called()
-                with patch.object(download, 'download_url', side_effect=lambda url, path: path.write_bytes(png())) as get:
+                with patch('core.download.download_url', side_effect=lambda url, path: path.write_bytes(png())) as get:
                     result = download._download(state['submission'])
                     download._download(state['submission'])
                     get.assert_called_once()
@@ -126,7 +129,7 @@ class VolcengineImageToImage(unittest.TestCase):
                 quote = store.read(work/(self.provider + '-priceing.json'))
                 expected = round(base + (count-1)*extra, 6)
                 self.assertEqual(quote['result']['amount'], {'min': expected, 'max': expected})
-                with patch('core.cost_quote.estimate', side_effect=AssertionError('No repricing')):
+                with patch('providers.estimate', side_effect=AssertionError('No repricing')):
                     self.assertEqual(len(consume_quote(spec, quote)[1]['assets']), count)
 
     def test_local_change_after_quote_is_blocked(self):
@@ -139,7 +142,7 @@ class VolcengineImageToImage(unittest.TestCase):
         compiled = consume_quote(spec, store.read(work/(self.provider + '-priceing.json')))[1]
         self.local.write_bytes(png()+b'changed')
         with self.assertRaisesRegex(ValueError, 'changed'):
-            transport.payload({'compiled': compiled})
+            payload_tools.payload({'compiled': compiled})
 
     def test_source_substitution_order_and_ids_are_bound(self):
         second = self.root/'second.png'; second.write_bytes(png())
@@ -175,8 +178,8 @@ class VolcengineImageToImage(unittest.TestCase):
                 calculate_asset_inputs(cost)
             probe.assert_not_called()
         with patch('core.media_probe.probe_asset') as probe, patch('sys.stdin', io.StringIO(json.dumps({**cost, 'provider': 'unknown'}))):
-            with self.assertRaisesRegex(ValueError, 'Only basic text-to-image'):
-                estimate_cost.run(SimpleNamespace(workdir=str(self.root)))
+            with self.assertRaisesRegex(ValueError, 'Volcengine or BytePlus'):
+                cost_command.run(SimpleNamespace(workdir=str(self.root)))
             probe.assert_not_called()
 
     def test_invalid_sources_and_coordinates_rejected(self):

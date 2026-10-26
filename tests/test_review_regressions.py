@@ -1,4 +1,4 @@
-"""Regression cases reproduced during the script audit; generation is always mocked."""
+"""复现脚本审查中发现的问题并执行回归测试；生成请求始终使用模拟对象。"""
 import copy
 import io
 import json
@@ -11,12 +11,13 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from commands import submit, deliver as download, status
 from core import submission_store as store
-from core.assets import inspect_asset
+from core.asset_inspect import inspect_asset
 from core.envfile import read_config
-from core.request import compile_request
+from providers import compile_request
 from cost_fixture import save_with_cost
 from config_fixture import config_fixture
-from providers import byteplus, volcengine
+from providers.byteplus import client as byteplus
+from providers.volcengine import client as volcengine
 from test_native_byteplus import request
 from test_runtime import png
 
@@ -76,14 +77,14 @@ class ReviewRegressions(unittest.TestCase):
                           'execution': {'state': 'succeeded', 'compiled': compile_request(self.spec)}}
                 record['execution']['compiled']['parameters']['size'] = size
                 store.write(self.work/'submit-001.json', record)
-                with patch.object(download, 'download_url', side_effect=lambda url, path: path.write_bytes(data)):
+                with patch('core.download.download_url', side_effect=lambda url, path: path.write_bytes(data)):
                     with self.assertRaisesRegex(ValueError, 'valid media'):
                         download._download(self.work/'submit-001.json')
                 self.assertFalse(store.read(self.work/'submit-001.json')['execution']['download_complete'])
 
     def test_valid_image_can_be_decoded_and_reused_without_network(self):
         state = self.post({'data': [{'url': 'https://example.com/out.png'}]})
-        with patch.object(download, 'download_url', side_effect=lambda url, path: path.write_bytes(png())) as get:
+        with patch('core.download.download_url', side_effect=lambda url, path: path.write_bytes(png())) as get:
             result = download._download(state['submission'])
             download._download(state['submission'])
             get.assert_called_once()
@@ -107,7 +108,7 @@ class ReviewRegressions(unittest.TestCase):
 
     def test_historical_video_query_errors_are_sanitized_before_persisting(self):
         record = {'execution': {'state': 'running', 'task_id': 'task',
-                               'compiled': {'provider': 'volcengine', 'kind': 'video', 'prompt': 'private prompt'}},
+                               'compiled': {'provider': 'volcengine', 'kind': 'video', 'operation': 'text-to-video', 'prompt': 'private prompt'}},
                   'response': {'id': 'task'}}
         path = self.work/'submit-001.json'
         store.write(path, record)
@@ -122,7 +123,7 @@ class ReviewRegressions(unittest.TestCase):
                   'execution': {'state': 'succeeded', 'compiled': compile_request(self.spec)}}
         path = self.work/'submit-001.json'
         store.write(path, record)
-        with patch.object(download, 'download_url') as get:
+        with patch('core.download.download_url') as get:
             with self.assertRaisesRegex(ValueError, 'differs from confirmed format'):
                 download._download(path)
             get.assert_not_called()

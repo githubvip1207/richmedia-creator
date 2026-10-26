@@ -1,4 +1,4 @@
-"""BytePlus native text-to-image uses its own models, USD quote and credentials."""
+"""BytePlus 原生文生图使用自身的模型、美元报价和凭证。"""
 import base64
 import copy
 import sys
@@ -8,11 +8,14 @@ from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from commands import submit as submit_command, deliver as download_command
-from core.request import compile_request
-from core.cost_quote import consume_quote
+from providers import compile_request
+from providers import consume_quote
 from cost_fixture import calculate, save_with_cost
+from core import payload as payload_tools
 from core import submission_store as store
-from providers import byteplus, volcengine, transport
+from providers.byteplus import client as byteplus
+from providers.volcengine import client as volcengine
+from core import http as transport
 from config_fixture import config_fixture
 from test_runtime import png
 
@@ -32,7 +35,7 @@ class NativeBytePlus(unittest.TestCase):
                 spec=request(model);before=copy.deepcopy(spec)
                 compiled=compile_request(spec)
                 self.assertEqual(compiled['provider'], 'byteplus')
-                self.assertEqual(transport.payload({'compiled': compiled}), before['payload'])
+                self.assertEqual(payload_tools.payload({'compiled': compiled}), before['payload'])
                 self.assertEqual(spec, before)
 
     def test_usd_quote_is_reused_without_repricing(self):
@@ -40,7 +43,7 @@ class NativeBytePlus(unittest.TestCase):
         self.assertEqual(quote['result']['currency'], 'USD')
         self.assertEqual(quote['result']['amount'], {'min': 0.018, 'max': 0.018})
         self.assertIn('docs.byteplus.com', quote['calculation']['pricing']['source'])
-        with patch('core.cost_quote.estimate', side_effect=AssertionError('Unexpected repricing')):
+        with patch('providers.estimate', side_effect=AssertionError('Unexpected repricing')):
             self.assertEqual(consume_quote(spec,quote)[3], quote['result'])
 
     def test_submit_and_download_use_byteplus_only(self):

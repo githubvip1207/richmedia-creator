@@ -1,6 +1,6 @@
 # 供应商隔离测试：覆盖密钥、模型 ID、独立币种、离线报价及唯一供应商提交。
 # 示例密钥和汇率仅是本地测试数据，不能用于真实请求或实际报价。
-"""Supplier isolation, native billing, offline comparisons and one-choice submission."""
+"""验证供应商隔离、原币计费、离线比价及选定供应商后的唯一提交。"""
 import copy
 import datetime as dt
 import io
@@ -15,13 +15,15 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command, status as status_command
-from providers import byteplus, volcengine, configured
+from providers.byteplus import client as byteplus
+from providers.volcengine import client as volcengine
+from providers import configured
 from config_fixture import config_fixture
 from core import submission_store as store
 from cost_fixture import save_with_cost
-from core.request import CATALOGS, ROOT
-from core.legacy_request import compile_request
-from core.cost_formula import estimate
+from core.catalogs import CATALOGS, ROOT
+from legacy_request import compile_request
+from providers import estimate
 
 
 # 构造 BytePlus 视频请求夹具，使用逻辑模型别名和测试优化记录，可用 extra 覆盖场景。
@@ -98,7 +100,8 @@ class SupplierBehavior(unittest.TestCase):
         self.assertEqual(e['tokens'][0],432000)
         self.assertEqual(e['unit_price_per_million_tokens'],6.4)
         self.assertEqual(e['amount'][0],2.7648)
-        self.assertIsNone(e['amount'][1])  # Separate minimum floor is not yet verified.
+        self.assertGreaterEqual(e['amount'][1], e['amount'][0])
+        self.assertTrue(e['minimum_tokens_evidence'])
 
     # 将国内素材 ID 用于 BytePlus 时，provenance.provider 不匹配应直接拒绝。
     def test_supplier_scoped_asset_id(self):

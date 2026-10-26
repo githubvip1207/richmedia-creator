@@ -1,4 +1,4 @@
-"""Final delivery publishes only verified outputs, with safe and resumable copies."""
+"""最终交付只发布验证通过的输出，并支持安全复制和中断恢复。"""
 import json
 import sys
 import unittest
@@ -35,7 +35,7 @@ class Delivery(unittest.TestCase):
 
     def test_complete_delivery_contains_only_media_and_portable_metadata(self):
         work, submission = self.ready(); target = self.output_directory()
-        with patch.object(deliver, 'download_url', side_effect=self.media_get):
+        with patch('core.download.download_url', side_effect=self.media_get):
             result = deliver.deliver(submission, target)
         directory = Path(result['directory'])
         self.assertEqual(directory.parent, target)
@@ -50,7 +50,7 @@ class Delivery(unittest.TestCase):
 
     def test_repeated_delivery_reuses_files_and_cache_without_get(self):
         _, submission = self.ready(); target = self.output_directory()
-        with patch.object(deliver, 'download_url', side_effect=self.media_get) as get:
+        with patch('core.download.download_url', side_effect=self.media_get) as get:
             first = deliver.deliver(submission, target)
             second = deliver.deliver(submission, target)
             self.assertEqual(get.call_count, 2)
@@ -62,7 +62,7 @@ class Delivery(unittest.TestCase):
         work, submission = self.ready(); target = self.output_directory()
         occupied = target/('richmedia-'+work.name+'-submit-001'); occupied.mkdir()
         (occupied/'keep.txt').write_text('keep')
-        with patch.object(deliver, 'download_url', side_effect=self.media_get):
+        with patch('core.download.download_url', side_effect=self.media_get):
             first = deliver.deliver(submission, target)
             Path(first['files'][0]['path']).write_bytes(b'user edited')
             second = deliver.deliver(submission, target)
@@ -80,7 +80,7 @@ class Delivery(unittest.TestCase):
                 output.write(b'incomplete')
                 raise OSError('copy interrupted')
             return copy(source, output)
-        with patch.object(deliver, 'download_url', side_effect=self.media_get) as get:
+        with patch('core.download.download_url', side_effect=self.media_get) as get:
             with patch.object(deliver.shutil, 'copyfileobj', side_effect=interrupted):
                 with self.assertRaisesRegex(OSError,'interrupted'):deliver.deliver(submission, target)
             self.assertFalse(store.read(submission)['execution']['delivery_complete'])
@@ -91,7 +91,7 @@ class Delivery(unittest.TestCase):
 
     def test_current_directory_is_default_and_new_target_gets_new_delivery(self):
         _, submission = self.ready(); first_target=self.output_directory(); second_target=self.output_directory('other')
-        with patch.object(deliver, 'download_url', side_effect=self.media_get):
+        with patch('core.download.download_url', side_effect=self.media_get):
             with patch.object(deliver.Path, 'cwd', return_value=first_target):
                 first = deliver.run(SimpleNamespace(submission=submission))
             second = deliver.deliver(submission,second_target)
@@ -105,7 +105,7 @@ class Delivery(unittest.TestCase):
             record=store.read(submission);record['execution']['state']=state
             if state != 'submission_unknown':record['response']['data'][1]={'error':{'message':'failed'}}
             store.write(submission,record)
-            with patch.object(deliver, 'download_url') as get:
+            with patch('core.download.download_url') as get:
                 with self.assertRaises(ValueError):deliver.deliver(submission,target)
                 get.assert_not_called()
             self.assertFalse(store.read(submission)['execution']['delivery_complete'])

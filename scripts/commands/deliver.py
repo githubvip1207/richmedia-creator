@@ -1,320 +1,170 @@
-"""deliver: retrieve, validate and publish final outputs to the user directory."""
-import base64
-import http.client
-import json
+r"""命令行调用
+
+    python3 "$SKILL/scripts/main.py" deliver --submission /absolute/submit-001.json
+
+    # --submission：必填，由 submit 生成的提交记录 JSON 文件。
+    # 交付目标为当前项目目录；CLI 没有 --destination 参数。
+
+输入文件格式
+
+实际文件为 UTF-8 标准 JSON，根节点为对象；下方 JSONC 的 // 仅用于逐字段说明，写文件时删除注释。
+
+--submission 指向 submit-NNN.json，必须使用 submit 自动保存的完整记录；
+不能仅提供 task_id，也不是原始 task-spec.json。
+该文件与 submit.py 的文件输出完全相同，JSON 格式统一见 submit.py 的“文件输出格式”，此处不重复。
+其中 execution.compiled 决定供应商与能力，execution.task_id 用于视频查询；
+视频交付还使用 queries 中最近一次成功响应的 content.video_url。
+
+标准输出格式
+
+```jsonc
+{
+  "directory": "/absolute/delivery", // string；实际交付子目录绝对路径，不覆盖用户已有文件。
+  "files": [ // DeliveredFile[]；仅已验证媒体文件；不包含过程记录、输入素材或 layers.json。
+    {
+      "path": "/absolute/delivery/output.mp4", // string；交付文件绝对路径。
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000", // string；交付文件内容 SHA-256。
+      "verification": {}, // OutputVerification?；完整字段见 commands/__init__.py；不是空对象。
+      "kind": "video", // "image" | "video"?；从输出清单继承的媒体类型；正常交付会提供。
+      "provider": "volcengine", // Provider?；从输出清单继承的供应商标识。
+      "model": "doubao-seedance-2-5-260628", // string?；从输出清单继承的准确模型 ID。
+      "metadata": { // VideoMetadata?；视频实测规格；图像通常省略。
+        "width": 854, // integer；输出视频编码像素宽。
+        "height": 480, // integer；输出视频编码像素高。
+        "duration": 5, // number；输出视频实测秒数，可能不是整数。
+        "codec": "h264", // string | null；输出视频编解码器名称。
+        "frame_rate": "24/1", // string | null；ffprobe 平均帧率表达式，例如 24/1。
+        "has_audio": false // boolean；输出文件是否包含音轨。
+      }
+    }
+  ],
+  "delivered_at": "2026-10-26T00:01:00+00:00", // string；交付记录创建时间，UTC ISO 8601。
+  "metadata": { // object?；图层拆分时额外输出的位置元数据文件信息。
+    "path": "/absolute/delivery/layers.json", // string；layers.json 的交付绝对路径。
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000" // string；位置元数据文件 SHA-256。
+  },
+  "cost_comparison": { // CostComparison?；生成后费用核对结果，旧交付记录可能没有。
+    "status": "compared", // "compared" | "partial" | "unavailable"；完整核对、部分核对或缺少历史报价。
+    "reason": "示例说明：输出时长由模型自动决定", // string?；部分/无法核对的原因；unavailable 时可仅返回此字段及 status。
+    "currency": "CNY", // "CNY" | "USD"?；核对使用的报价原币。
+    "estimated_amount": { // Amount?；提交时原币报价范围；定义见 commands/__init__.py。
+      "min": 1.0, // number | null；估算范围起点；null 表示未知，不能按 0 理解。
+      "max": 2.0 // number | null；估算范围终点；不是账单封顶；null 表示未知。
+    },
+    "outputs": [ // OutputObservation[]?；逐个实际输出的规格或单价。
+      {
+        "dimensions": [1024, 1024], // [integer,integer] | null?；图片实测 [宽,高]；无法读取时 null。
+        "unit_price": 1.0, // number?；图片尺寸可读取时的对应像素档单价。
+        "unit_price_range": [0.15, 0.3] // Pair?；图片尺寸无法读取时保留的低/高像素档单价范围。
+      }
+    ],
+    "actual_billed_amount": null, // null?；API 不提供账户实付账单，不能用刊例核算代替。
+    "basis": "示例计费依据", // string?；按提交时刊例单价核算、区别于实付账单的说明。
+    "actual_tokens": 1, // integer?；视频 API usage.completion_tokens 实际值。
+    "estimated_tokens": [86400, 86400], // Pair | null?；视频提交时计费 Token 估算范围。
+    "usage_cost_at_list_price": 1.0, // number?；视频实际 Token 乘以提交时刊例单价的费用。
+    "difference_percent_outside_estimate": 1.0, // number | null?；金额超出估算范围百分比；范围内 0，低于范围为负。
+    "token_difference_percent_outside_estimate": 1.0, // number | null?；视频 Token 超出其估算范围百分比。
+    "assumed_dimensions": [854, 480], // [integer,integer] | null?；视频原先假定的输出 [宽,高]。
+    "assumed_duration": [4, 30], // Pair | null?；视频原先假定的输出秒数范围。
+    "output_count": 2, // integer?；图片/图层实际输出数量，拆层含底图。
+    "observed_output_cost_at_list_price": { // Amount?；图片按实际数量/像素档及额外输入图费计算的刊例费用。
+      "min": 1.0, // number | null；估算范围起点；null 表示未知，不能按 0 理解。
+      "max": 2.0 // number | null；估算范围终点；不是账单封顶；null 表示未知。
+    }
+  }
+}
+```
+
+文件输出格式
+
+- <directory>/ 下的媒体文件：PNG/JPEG 图片或 MP4/MOV 视频，路径见标准输出 files[].path；不是 JSON 文件。
+- 更新 submit-NNN.json：增加下载结果 result 和交付记录 delivery；delivery 与上述标准输出完全相同，不重复描述。
+- 图层拆分额外输出 <directory>/layers.json，格式如下；metadata.path 指向该文件。
+
+```jsonc
+{
+  "schema_version": 1, // 1；图层元数据结构版本。
+  "provider": "volcengine", // Provider；生成图层的供应商。
+  "model": "doubao-seedream-5-0-pro-260628", // string；准确模型 ID。
+  "canvas": { // object；底图画布尺寸。
+    "width": 854, // integer；底图像素宽。
+    "height": 480 // integer；底图像素高。
+  },
+  "coordinates": { // object；坐标解释说明，值为字符串。
+    "absolute": "output-base pixels: [left, top, right, bottom]", // string；像素框 [left,top,right,bottom] 的坐标系说明。
+    "normalized": "output-base coordinates divided by 1000" // string；归一化框的坐标系说明。
+  },
+  "layers": [ // object[]；按 z_index 排序的底图与图层清单。
+    {
+      "file": "01-layer.png", // string；对应媒体相对文件名，可与交付目录一起移动。
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000", // string；对应媒体文件内容哈希。
+      "z_index": 1, // integer?；供应商输出层级，0 为底图，其他值为图层。
+      "size": "1024x1024", // string?；供应商返回的图层 WIDTHxHEIGHT。
+      "output_format": "png", // string?；图层格式，目前 PNG。
+      "bounding_box": { // object?；前景图层在底图上的位置，底图可不提供。
+        "absolute": [0, 0, 100, 100], // integer[]；以底图像素计的 [left,top,right,bottom]。
+        "normalized": [0, 0, 100, 100] // integer[]；0～1000 范围内的 [left,top,right,bottom]。
+      },
+      "name": "狐狸", // string?；供应商提供的图层名称，底图可省略。
+      "description": "示例文本" // string?；供应商提供的图层内容说明，底图可省略。
+    }
+  ]
+}
+```
+
+失败输出
+
+已捕获异常的 stderr JSON 格式见 __init__.py；命令行参数错误使用 argparse usage 文本。
+"""
+
+from core.delivery_files import publish_outputs
 import os
 import shutil
-import subprocess
-import time
-import urllib.request
-import urllib.error
 from pathlib import Path
-from core.request import require
+from core.validation import require
 from core.submission_store import read, write, lock, submission_path, now
-from core.assets import sha256_file
-from providers import get_provider
-
-
-def video_metadata(path):
-    """Inspect actual decoded frames, dimensions, duration and audio presence."""
-    probe = shutil.which('ffprobe')
-    require(probe is not None, 'ffprobe is required to validate downloaded videos')
-    try:
-        with open(path, 'rb') as stream:
-            head = stream.read(12)
-        require(len(head) >= 12 and head[4:8] == b'ftyp', 'Invalid MP4/MOV container')
-        result = subprocess.run([probe, '-v', 'error', '-count_frames', '-show_streams',
-                                 '-show_format', '-of', 'json', str(path)],
-                                capture_output=True, text=True, timeout=60)
-        data = json.loads(result.stdout)
-        stream = next(s for s in data['streams'] if s.get('codec_type') == 'video')
-        duration = float(data.get('format', {}).get('duration', stream.get('duration', 0)))
-        require(result.returncode == 0 and not result.stderr.strip() and duration > 0
-                and stream.get('width', 0) > 0 and stream.get('height', 0) > 0
-                and int(stream.get('nb_read_frames', 0)) > 0, 'Invalid video stream')
-        return {'width': stream['width'], 'height': stream['height'], 'duration': duration,
-                'codec': stream.get('codec_name'), 'frame_rate': stream.get('avg_frame_rate'),
-                'has_audio': any(s.get('codec_type') == 'audio' for s in data['streams'])}
-    except (OSError, subprocess.SubprocessError, ValueError, TypeError, KeyError, StopIteration):
-        raise ValueError('Downloaded video has no valid decodable video stream') from None
-
-
-def valid_media(path, kind, expected_size=None, require_alpha=False):
-    with open(path,'rb') as f:
-        head = f.read(32)
-    if kind == 'video':
-        if not (len(head)>8 and head[4:8] == b'ftyp'):
-            return False
-        try:
-            video_metadata(path)
-            return True
-        except ValueError:
-            return False
-    if not (head.startswith((b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff')) or
-            (head.startswith(b'RIFF') and head[8:12] == b'WEBP')):
-        return False
-    probe = shutil.which('ffprobe')
-    require(probe is not None, 'ffprobe is required to validate downloaded images')
-    try:
-        result = subprocess.run(
-            [probe, '-v', 'error', '-select_streams', 'v:0', '-show_streams',
-             '-show_frames', '-of', 'json', str(path)],
-            capture_output=True, text=True, timeout=30)
-        data = json.loads(result.stdout)
-        if require_alpha:
-            formats = [stream.get('pix_fmt', '') for stream in data.get('streams', [])]
-            if not any(fmt in ('rgba', 'bgra', 'argb', 'abgr', 'ya8', 'ya16be', 'ya16le')
-                       or fmt.startswith(('yuva', 'gbrap')) for fmt in formats):
-                return False
-        if expected_size and 'x' in expected_size:
-            width, height = map(int, expected_size.split('x'))
-            if not any(s.get('width') == width and s.get('height') == height
-                       for s in data.get('streams', [])):
-                return False
-        return (result.returncode == 0 and not result.stderr.strip()
-                and any(s.get('width', 0) > 0 and s.get('height', 0) > 0
-                        for s in data.get('streams', []))
-                and bool(data.get('frames')))
-    except (OSError, subprocess.SubprocessError, ValueError, TypeError, AttributeError):
-        return False
-
-
-def download_with_curl(executable, url, destination):
-    """Fetch media with bounded connection/stall waits, never a generation POST."""
-    require(url.startswith('https://') and not any(ord(c) < 32 for c in url),
-            'Output URL must be HTTPS without control characters')
-    # Keep signed URLs out of process arguments and suppress ~/.curlrc settings.
-    escaped = url.replace('\\', '\\\\').replace('"', '\\"')
-    try:
-        result = subprocess.run(
-            [executable, '-q', '--config', '-', '--location', '--fail', '--silent',
-             '--show-error', '--proto', '=https', '--proto-redir', '=https',
-             '--connect-timeout', '15', '--speed-limit', '1024', '--speed-time', '20',
-             '--max-time', '900', '--user-agent', 'richmedia-creator/1.0',
-             '--output', str(destination), '--write-out', '%{http_code}'],
-            input='url = "' + escaped + '"\n', capture_output=True, text=True, timeout=915)
-    except subprocess.TimeoutExpired:
-        raise TimeoutError('Media transfer exceeded total timeout') from None
-    if result.returncode:
-        status = result.stdout.strip()
-        if status.isdigit() and int(status) >= 400:
-            raise urllib.error.HTTPError(url, int(status), 'Media HTTP error', {}, None)
-        # curl stderr may contain a signed URL; expose only the numeric exit code.
-        raise OSError('Media transport curl exit %s' % result.returncode)
-
-
-def download_url(url, destination):
-    """Retry only media GETs; each attempt replaces any incomplete file."""
-    for attempt in range(3):
-        try:
-            curl = shutil.which('curl')
-            if curl:
-                download_with_curl(curl, url, destination)
-                return
-            # Without curl, retain urllib compatibility with a bounded read wait.
-            # 媒体 URL 已包含下载授权，不附加 API Key；30 秒是每次阻塞读取的超时，不是整个下载总时长。
-            # No API credentials on media downloads. Timeout is per blocking read.
-            # Identify this client explicitly; do not attach supplier API credentials.
-            request = urllib.request.Request(url, headers={'User-Agent': 'richmedia-creator/1.0'})
-            with urllib.request.urlopen(request, timeout=30) as response, open(destination, 'wb') as f:
-                require(response.geturl().startswith('https://'), 'Refuse HTTPS downgrade')
-                received = 0
-                while True:
-                    chunk = response.read(64 * 1024)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    received += len(chunk)
-                # 声明了 Content-Length 时核对实际字节数，避免把提前结束的传输当作完整文件。
-                expected = response.headers.get('Content-Length')
-                if expected is not None and received != int(expected):
-                    raise http.client.IncompleteRead(b'', max(0, int(expected) - received))
-            return
-        except (OSError, urllib.error.URLError, http.client.IncompleteRead) as error:
-            # 只重试传输类错误和指定临时 HTTP 状态；404 等永久错误不重试。
-            retryable = not isinstance(error, urllib.error.HTTPError) or error.code in (408, 429, 500, 502, 503, 504)
-            if isinstance(error, urllib.error.HTTPError):
-                error.close()
-            if not retryable or attempt == 2:
-                detail = ('HTTP %s' % error.code if isinstance(error, urllib.error.HTTPError)
-                          else str(error) if str(error).startswith('Media transport curl exit ')
-                          else type(error).__name__)
-                raise RuntimeError('Media download failed after %s attempt(s): %s; '
-                                   'generation is preserved, retry deliver only' % (attempt + 1, detail)) from None
-            # 第一次失败等待两秒，第二次等待四秒；第三次失败退出，不无限重试。
-            time.sleep(2 ** (attempt + 1))
+from core.file_hash import sha256_file
+from providers import capability_for_record
 
 
 def _download(submission):
-    record_path = submission_path(submission)
-    d = record_path.parent
-    with lock(d):
-        record = read(record_path)
-        state = record['execution']
-        result = record.get('response')
-        if state['compiled']['kind'] == 'video':
-            result = next((q['response'] for q in reversed(record.get('queries', []))
-                           if isinstance(q.get('response'), dict) and q['response'].get('id', state['task_id']) == state['task_id']), result)
-        plan = state
-        require(state['state'] in ('succeeded','partial_failed'), 'Task not completed successfully; query status first')
-        # 旧完成标记不能代表本次检查结果；失败时保留 false，完整清单仍用于恢复。
-        state['download_complete'] = False
-        write(record_path, record)
-        output = d/('output-' + record_path.stem.split('-')[1])
-        # Existing downloaded submissions keep their old paths and hash-based reuse.
-        legacy_output = d/'outputs'/record_path.stem
-        if legacy_output.is_dir() and any(Path(f['path']).parent.resolve() == legacy_output.resolve() for f in record.get('result', {}).get('files', [])):
-            output = legacy_output
-        output.mkdir(mode=0o700,parents=True,exist_ok=True)
-        # 图片保留每个非错误 data 项；视频同时处理主视频和可选末帧。
-        if plan['compiled']['kind'] == 'image':
-            if plan['compiled'].get('operation') == 'decompose-layers':
-                from core.layers import validate_layer_outputs
-                entries = [(x, 'image') for x in validate_layer_outputs(result.get('data'))]
-            else:
-                entries = [(x,'image') for x in result.get('data',[]) if not x.get('error')]
-        else:
-            c = result.get('content',{})
-            entries = [({'url':c['video_url'],'label':'video'},'video')] if c.get('video_url') else []
-            if c.get('last_frame_url'):
-                entries.append(({'url':c['last_frame_url'],'label':'last-frame'},'image'))
-        require(bool(entries), 'No downloadable media in response')
-        previous = record.get('result', {}).get('files', [])
-        manifest = []
-        for i,(entry,kind) in enumerate(entries):
-            fmt = entry.get('output_format', 'jpeg' if entry.get('label') == 'last-frame' else plan['compiled']['parameters']['output_format'])
-            # 透明图层即使计划默认 JPEG，也强制按供应商图层 PNG 格式保存。
-            if kind == 'image' and entry.get('z_index',0) > 0:
-                fmt = 'png'
-            require(fmt in ('png','jpeg','mp4','mov'), 'Unexpected output format')
-            if plan['compiled'].get('operation') in ('text-to-image', 'image-to-image'):
-                require(fmt == plan['compiled']['parameters']['output_format'],
-                        'Provider image format differs from confirmed format')
-            is_layer = plan['compiled'].get('operation') == 'decompose-layers'
-            label = ('base' if entry['z_index'] == 0 else 'layer') if is_layer else entry.get('label', 'image')
-            name = ('%02d-' % i) + label + '.' + fmt
-            path = output/name
-            # 清单哈希与磁盘内容一致才跳过下载，不能仅凭文件名存在就假定完整。
-            previous_entry = next((x for x in previous if Path(x['path']).resolve() == path.resolve()), None)
-            if not (previous_entry and path.is_file() and sha256_file(path) == previous_entry['sha256']):
-                tmp = path.with_suffix(path.suffix+'.part')
-                # 同步图片可从 Base64 恢复；URL 下载只接受 HTTPS，先写临时 .part 文件。
-                if entry.get('b64_json'):
-                    tmp.write_bytes(base64.b64decode(entry['b64_json'],validate=True))
-                else:
-                    url = entry.get('url','')
-                    require(url.startswith('https://'), 'Output URL must be HTTPS')
-                    download_url(url, tmp)
-            else:
-                tmp = path
-            expected_size = entry['size'] if is_layer else plan['compiled']['parameters'].get('size')
-            actual_metadata = video_metadata(tmp) if kind == 'video' else None
-            if actual_metadata:
-                valid = True
-            else:
-                valid = (valid_media(tmp, kind, expected_size, require_alpha=entry['z_index'] > 0)
-                         if is_layer else valid_media(tmp, kind, expected_size))
-            require(valid,
-                    'Downloaded content is not valid media; retained file for inspection')
-            if kind == 'image':
-                with tmp.open('rb') as stream:
-                    signature = stream.read(8)
-                require((fmt == 'png' and signature == b'\x89PNG\r\n\x1a\n')
-                        or (fmt == 'jpeg' and signature.startswith(b'\xff\xd8\xff')),
-                        'Downloaded image format differs from confirmed format')
-            if tmp != path:
-                os.replace(str(tmp), str(path))
-            # 清单保留供应商、模型、任务、原始图层元数据和哈希；剔除庞大 Base64 正文。
-            manifest.append({'path':str(path),'sha256':sha256_file(path),'kind':kind,
-                             **({'metadata': actual_metadata} if actual_metadata else {}),
-                             'origin':{k:v for k,v in entry.items() if k != 'b64_json'},
-                             'provider':plan['compiled']['provider'], 'model':plan['compiled']['payload_template']['model'],
-                             'task_id':state.get('task_id'), 'downloaded_at':now(), 'original':True})
-            # 每份文件完成后立即落盘进度，后续下载失败也可复用已完成内容；实际扣费保持未知。
-            record['result'] = {'files':manifest,'usage':result.get('usage'), 'actual_billed_amount_cny':None,
-                                   'billing_currency':get_provider(plan['compiled']['provider'])['currency'], 'actual_billed_amount':None,
-                                   'note':'Original provider outputs preserved; actual paid amount is not returned by this API.'}
-            write(record_path, record)
-        if plan['compiled'].get('operation') == 'decompose-layers':
-            from core.layers import position_metadata
-            metadata_path = output/'layers.json'
-            write(metadata_path, position_metadata(manifest))
-            record['result']['metadata'] = {'path': str(metadata_path), 'sha256': sha256_file(metadata_path)}
-        state['download_complete'] = True
-        write(record_path, record)
-        return record['result']
-
+    path = submission_path(submission)
+    with lock(path.parent):
+        record = read(path)
+        return capability_for_record(record).deliver(record, path)
 
 
 def deliver(submission, destination=None):
-    """Deliver verified media and optional layer metadata, never process files."""
+    """交付验证通过的媒体及可选图层元数据，不交付过程文件。"""
     from commands.status import status, status_result
+
     record_path = submission_path(submission)
     destination = Path(destination or Path.cwd()).resolve(strict=True)
-    require(destination.is_dir(), 'Delivery destination must be an existing directory')
-    require(destination != record_path.parent and record_path.parent not in destination.parents,
-            'Deliver to the user project directory, not the temporary task directory')
+    require(destination.is_dir(), "Delivery destination must be an existing directory")
+    require(
+        destination != record_path.parent and record_path.parent not in destination.parents,
+        "Deliver to the user project directory, not the temporary task directory",
+    )
     with lock(record_path.parent):
         record = read(record_path)
-        record['execution']['delivery_complete'] = False
+        record["execution"].setdefault("delivery_complete", False)
         write(record_path, record)
-    checked = status_result(status(record_path))
-    require(checked['success'], checked['error'] or 'Generation not successful; cannot deliver')
-    _download(record_path)
-    with lock(record_path.parent):
-        record = read(record_path)
-        result = record['result']
-        require(record['execution'].get('download_complete') is True, 'Media retrieval is incomplete')
-        sources = [*result['files']]
-        if result.get('metadata'):
-            sources.append(result['metadata'])
-        for item in sources:
-            require(Path(item['path']).is_file() and sha256_file(item['path']) == item['sha256'],
-                    'Cached output changed; retry deliver')
-        previous = record.get('delivery')
-        directory = Path(previous['directory']) if previous else None
-        reusable = (directory is not None and directory.is_dir() and not directory.is_symlink()
-                    and directory.parent == destination
-                    and all((not (directory/Path(item['path']).name).exists()
-                             and not (directory/Path(item['path']).name).is_symlink())
-                            or ((directory/Path(item['path']).name).is_file()
-                                and not (directory/Path(item['path']).name).is_symlink()
-                                and sha256_file(directory/Path(item['path']).name) == item['sha256'])
-                            for item in sources))
-        if not reusable:
-            base = 'richmedia-' + record_path.parent.name + '-' + record_path.stem
-            counter = 0
-            while True:
-                directory = destination/(base + ('-' + str(counter) if counter else ''))
-                try:
-                    directory.mkdir(mode=0o700)
-                    break
-                except FileExistsError:
-                    counter += 1
-            if previous:
-                record.setdefault('delivery_history', []).append(previous)
-        delivered = {'directory': str(directory), 'files': [], 'delivered_at': now()}
-        record['delivery'] = delivered
-        write(record_path, record)
-        for item in sources:
-            target = directory/Path(item['path']).name
-            if not target.exists():
-                # Exclusive creation preserves user files, including during retries.
-                with open(item['path'], 'rb') as source, target.open('xb') as output:
-                    shutil.copyfileobj(source, output)
-                    output.flush()
-                    os.fsync(output.fileno())
-            require(sha256_file(target) == item['sha256'], 'Delivered file checksum mismatch')
-            final = {'path': str(target), 'sha256': item['sha256']}
-            if item is result.get('metadata'):
-                delivered['metadata'] = final
-            else:
-                final.update({k: item[k] for k in ('kind', 'provider', 'model', 'metadata') if k in item})
-                delivered['files'].append(final)
+        cached = record["execution"].get("download_complete") is True
+        if cached:
+            items = list(record.get("result", {}).get("files", []))
+            if record.get("result", {}).get("metadata"):
+                items.append(record["result"]["metadata"])
+            cached = bool(items) and all(Path(f["path"]).is_file() and sha256_file(f["path"]) == f["sha256"] for f in items)
+        if not cached:
+            record["execution"]["delivery_complete"] = False
             write(record_path, record)
-        record['execution']['delivery_complete'] = True
-        write(record_path, record)
-        return delivered
+    if cached:
+        return publish_outputs(record_path, destination)
+    checked = status_result(status(record_path))
+    require(checked["success"], checked["error"] or "Generation not successful; cannot deliver")
+    _download(record_path)
+    return publish_outputs(record_path, destination)
 
 
 def run(args):

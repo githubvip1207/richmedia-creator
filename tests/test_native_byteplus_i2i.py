@@ -1,4 +1,4 @@
-"""BytePlus uses the shared image-to-image contract with its own account and USD rates."""
+"""BytePlus 采用共用图生图接口约定，同时使用独立账户和美元费率。"""
 import copy
 import io
 import json
@@ -7,7 +7,8 @@ from unittest.mock import patch
 import test_native_volcengine_i2i as shared
 from core import submission_store as store
 from commands import submit
-from providers import byteplus, volcengine
+from providers.byteplus import client as byteplus
+from providers.volcengine import client as volcengine
 from config_fixture import config_fixture
 
 

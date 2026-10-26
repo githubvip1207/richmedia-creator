@@ -1,4 +1,4 @@
-"""Direct CLI submission uses saved costs, never preparation or confirmation hashes."""
+"""命令行直接提交使用已保存报价，不依赖准备流程或确认哈希。"""
 import importlib.util
 import json
 import subprocess
@@ -11,9 +11,9 @@ from unittest.mock import patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command, status as status_command
 from core import submission_store as store
-from core.request import ROOT
+from core.catalogs import ROOT
 from cost_fixture import calculate, save_with_cost
-from providers import volcengine
+from providers.volcengine import client as volcengine
 from config_fixture import config_fixture
 
 
@@ -33,7 +33,7 @@ class DirectCLI(unittest.TestCase):
         cli=importlib.util.module_from_spec(module_spec);module_spec.loader.exec_module(cli)
         with config_fixture({'VOLCENGINE_API_KEY':'fixture-only'}), \
              patch.object(volcengine,'request',return_value={'data':[{'url':'https://example.com/cat.png'}]}) as post, \
-             patch('core.cost_quote.estimate',side_effect=AssertionError('No recalculation')), \
+             patch('providers.estimate',side_effect=AssertionError('No recalculation')), \
              patch.object(cli,'emit'), \
              patch.object(sys,'argv',['main.py','submit','--workdir',str(self.work),
                                      '--request',str(self.work/'task-spec.json'),'--approval-text','TEST: selected supplier']):

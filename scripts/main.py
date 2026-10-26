@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 # 命令行入口：读取项目配置，计算成本或执行已确认的供应商任务。
 # 只有 submit 创建媒体生成请求；check 只读，doctor 可安装依赖或更新项目汇率。
-"""RichMedia Creator CLI (Python 3.9+, stdlib only)."""
+"""富媒体生成器命令行入口，要求 Python 3.9 及以上，仅使用标准库。"""
 import argparse
 import json
 import subprocess
 import sys
-from providers import PROVIDERS
-from commands import (init as init_command, models as models_command,
+from commands import (init as init_command,
                       check as check_command, doctor as doctor_command,
-                      estimate_cost as estimate_cost_command, submit as submit_command,
+                      cost as cost_command, submit as submit_command,
                       status as status_command, deliver as deliver_command)
 
-COMMANDS = {'init': init_command, 'models': models_command, 'check': check_command,
-            'doctor': doctor_command, 'estimate-cost': estimate_cost_command,
+COMMANDS = {'init': init_command, 'check': check_command,
+            'doctor': doctor_command, 'cost': cost_command,
             'submit': submit_command, 'status': status_command, 'deliver': deliver_command}
 
 
@@ -28,13 +27,12 @@ def main():
     subs = parser.add_subparsers(dest='command',required=True)
     # check 只读；doctor 可执行依赖安装与汇率 GET，但不提交媒体生成。
     init = subs.add_parser('init', help='Read a JSON object from stdin and save request.json in a private run directory')
-    models = subs.add_parser('models')
-    models.add_argument('--provider',choices=list(PROVIDERS))
     subs.add_parser('check', help='Read-only configuration and dependency checks')
     repair = subs.add_parser('doctor', help='Repair dependencies and exchange-rate configuration, then recheck')
     repair.add_argument('--dependencies', action='store_true', help='Repair missing dependencies only')
     repair.add_argument('--exchange-rate', action='store_true', help='Refresh USD/CNY and update project .env only')
-    estimate = subs.add_parser('estimate-cost', help='Inspect cost assets and estimate costs from JSON on stdin; never submits generation')
+    repair.add_argument('--pricing', action='store_true', help='Verify official pricing; update only completely parsed supplier snapshots')
+    estimate = subs.add_parser('cost', help='Inspect cost assets and estimate costs from JSON on stdin; never submits generation')
     estimate.add_argument('--workdir', required=True, help='Existing task working directory')
     sub = subs.add_parser('submit', help='Submit the confirmed request using its saved supplier cost')
     sub.add_argument('--request',help='Optional task-spec.json path; otherwise read the request JSON from stdin')

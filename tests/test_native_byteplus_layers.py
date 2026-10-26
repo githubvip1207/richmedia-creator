@@ -1,4 +1,4 @@
-"""BytePlus layer decomposition shares validation, with independent credentials and USD quotes."""
+"""BytePlus 图层拆分复用校验规则，使用独立凭证和美元报价。"""
 import copy
 import io
 import json
@@ -8,8 +8,10 @@ import test_native_volcengine_layers as shared
 import test_deliver as delivery_tests
 from commands import submit, deliver
 from core import submission_store as store
-from core.request import compile_request, ROOT
-from providers import byteplus, volcengine
+from providers import compile_request
+from core.catalogs import ROOT
+from providers.byteplus import client as byteplus
+from providers.volcengine import client as volcengine
 from config_fixture import config_fixture
 
 
@@ -70,9 +72,8 @@ class BytePlusLayers(shared.LayerLifecycle):
         self.assertEqual(store.read(work/'submit-001.json')['execution']['state'],'submission_unknown')
 
     def test_documented_layer_example_compiles_for_byteplus(self):
-        document=(ROOT/'references/byteplus.md').read_text()
-        section=document.split('### 图层拆分（',1)[1]
-        example=section.split('```jsonc\n',1)[1].split('```',1)[0]
+        document=(ROOT/'references/byteplus/decompose-layers.md').read_text()
+        example=document.split('```jsonc\n',1)[1].split('```',1)[0]
         spec=json.loads('\n'.join(line.split(' //',1)[0] for line in example.splitlines()))
         spec['assets'][0]['source']=str(self.source)
         compiled=compile_request(spec)
@@ -90,7 +91,7 @@ class BytePlusDelivery(delivery_tests.Delivery):
 
     def test_delivered_manifest_identifies_byteplus(self):
         _,submission=self.ready();target=self.output_directory()
-        with patch.object(deliver,'download_url',side_effect=self.media_get):
+        with patch('core.download.download_url',side_effect=self.media_get):
             result=deliver.deliver(submission,target)
         self.assertTrue(all(f['provider']=='byteplus' and f['model'].startswith('dola-') for f in result['files']))
         self.assertEqual(store.read(result['metadata']['path'])['provider'],'byteplus')

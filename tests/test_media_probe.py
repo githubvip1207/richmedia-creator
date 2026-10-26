@@ -1,4 +1,4 @@
-"""Cost estimates derive billing inputs from media, not agent measurements."""
+"""估价所需计费输入来自实际媒体测量，不采用代理填写的测量值。"""
 import json
 import subprocess
 import sys
@@ -7,7 +7,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from core.media_probe import calculate_asset_inputs, probe_asset
+from providers import calculate_asset_inputs
+from core.media_probe import probe_asset
 from core import submission_store as store
 from test_runtime import png
 
@@ -40,13 +41,13 @@ class CostAssets(unittest.TestCase):
         spec={'provider':'volcengine','model':'seedance-2.0','operation':'reference-to-video', 'mode': 'reference',
               'resolution':'480p','ratio':'16:9','duration':4,
               'assets':[{'kind':'video','source':'https://example.com/input.mp4'}]}
-        result=self.probe_result({'codec_type':'video','width':1280,'height':720,'duration':'N/A'},format={'duration':'8.25'})
+        result=self.probe_result({'codec_type':'video','width':1280,'height':720,'duration':'N/A','codec_name':'h264','avg_frame_rate':'24/1'},format={'duration':'8.25','format_name':'mov,mp4','size':'2000'})
         with patch('core.media_probe.shutil.which', return_value='/bin/ffprobe'), patch('core.media_probe.subprocess.run', return_value=result) as run:
             quote=calculate_asset_inputs(spec)
         self.assertEqual(run.call_args.args[0][-1],spec['assets'][0]['source'])
         self.assertEqual(quote['calculation']['input_video_seconds'],[8.25])
         self.assertEqual(quote['calculation']['total_input_video_seconds'],8.25)
-        self.assertEqual(quote['result']['status'],'lower_bound')
+        self.assertEqual(quote['result']['status'],'estimate')
 
     def test_no_media_needs_no_ffprobe(self):
         with patch('core.media_probe.shutil.which', side_effect=AssertionError('No media')):

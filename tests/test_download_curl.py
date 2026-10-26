@@ -1,4 +1,4 @@
-"""Offline tests for the standard command's curl media transport."""
+"""标准命令通过 curl 传输媒体的离线测试。"""
 import subprocess
 import sys
 import tempfile
@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from commands import deliver as download
+from core import download
 
 
 class CurlDownload(unittest.TestCase):

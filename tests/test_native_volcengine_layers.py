@@ -1,4 +1,4 @@
-"""Layer lifecycle with real PNG probes and mocked generation/download transport."""
+"""使用真实 PNG 探测和模拟生成、下载请求验证图层完整流程。"""
 import base64
 import copy
 import io
@@ -13,12 +13,14 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from commands import init, estimate_cost, submit, status, deliver as download
+from commands import init, cost as cost_command, submit, status, deliver as download
 from core import submission_store as store
-from core.request import compile_request
-from core.media_probe import validate_layer_metadata, calculate_asset_inputs
+from providers import compile_request
+from providers.volcengine.decompose_layers import validate_layer_metadata
+from providers import calculate_asset_inputs
 from core.layers import validate_layer_outputs
-from providers import volcengine, byteplus
+from providers.volcengine import client as volcengine
+from providers.byteplus import client as byteplus
 from config_fixture import config_fixture
 
 
@@ -73,9 +75,9 @@ class LayerLifecycle(unittest.TestCase):
             if remote:
                 with patch('core.media_probe.probe_asset', return_value={**cost['assets'][0],
                         'metadata':{'width':512,'height':512,'mime':'image/png','bytes':1000}}):
-                    estimate_cost.run(SimpleNamespace(workdir=str(work)))
+                    cost_command.run(SimpleNamespace(workdir=str(work)))
             else:
-                estimate_cost.run(SimpleNamespace(workdir=str(work)))
+                cost_command.run(SimpleNamespace(workdir=str(work)))
         return work, spec
 
     def post(self, work, spec, response):
@@ -95,7 +97,7 @@ class LayerLifecycle(unittest.TestCase):
             self.assertEqual(body['prompt'],spec['payload']['prompt'])
             self.assertNotIn('data:image',Path(state['submission']).read_text())
             self.assertTrue(status.run(SimpleNamespace(submission=state['submission'],wait=0))['success'])
-            with patch.object(download,'download_url',side_effect=lambda url,path:path.write_bytes(png())) as get:
+            with patch('core.download.download_url',side_effect=lambda url,path:path.write_bytes(png())) as get:
                 result=download._download(state['submission']); download._download(state['submission'])
                 self.assertEqual(get.call_count,17)
             meta=store.read(result['metadata']['path'])
@@ -163,7 +165,7 @@ class LayerLifecycle(unittest.TestCase):
                 post.assert_not_called()
         self.source.write_bytes(png()+b'changed')
         with self.assertRaisesRegex(ValueError,'changed'):
-            from core.cost_quote import consume_quote
+            from providers import consume_quote
             consume_quote(original,store.read(work/(self.provider+'-priceing.json')))
 
     def test_any_layer_error_fails_whole_task(self):
@@ -189,7 +191,7 @@ class LayerLifecycle(unittest.TestCase):
     def test_non_alpha_or_wrong_dimensions_cannot_complete_download(self):
         for content in (png(alpha=False),png(400,400)):
             work,spec=self.prepare();state,_=self.post(work,spec,{'data':outputs()})
-            with patch.object(download,'download_url',side_effect=lambda url,path:path.write_bytes(content)):
+            with patch('core.download.download_url',side_effect=lambda url,path:path.write_bytes(content)):
                 with self.assertRaises(ValueError):download._download(state['submission'])
             self.assertFalse(store.read(state['submission'])['execution']['download_complete'])
 

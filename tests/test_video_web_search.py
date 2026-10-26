@@ -1,4 +1,4 @@
-"""Video web search: API transport, confirmation binding and usage audit."""
+"""视频联网搜索测试：验证 API 传输、确认方案绑定及用量审计。"""
 import copy
 import io
 import json
@@ -9,14 +9,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]/'scripts'))
-from test_native_video import request, prepare
-from core.request import compile_request
-from core.cost_quote import consume_quote
-from core.media_probe import calculate_asset_inputs
+from test_native_video import request, prepare, measured
+from providers import compile_request
+from providers import consume_quote
+from providers import calculate_asset_inputs
 from core import submission_store as store
-from providers import volcengine
-from providers.transport import payload
-from commands import submit, status, estimate_cost
+from providers.volcengine import client as volcengine
+from core.payload import payload
+from commands import submit, status, cost as cost_command
 from config_fixture import config_fixture
 
 TOOL = [{'type':'web_search'}]
@@ -28,6 +28,12 @@ class VideoWebSearch(unittest.TestCase):
             for mode in (None,'first-frame','first-last-frame'):
                 with self.subTest(model=model,mode=mode), tempfile.TemporaryDirectory() as tmp:
                     spec=request(model=model,mode=mode); spec['payload']['tools']=copy.deepcopy(TOOL)
+                    if mode and model != "seedance-2.5":
+                        with self.assertRaisesRegex(ValueError, 'pure text'):
+                            compile_request(spec, measured_assets=[{**{k:v for k,v in a.items() if k != 'metadata'}, **a['metadata']} for a in measured(spec)])
+                        spec['payload'].pop('tools')
+                        self.assertEqual(compile_request(spec, measured_assets=[{**{k:v for k,v in a.items() if k != 'metadata'}, **a['metadata']} for a in measured(spec)])['parameters']['tools'], [])
+                        continue
                     before=copy.deepcopy(spec); quote=prepare(Path(tmp),spec)
                     _,compiled,_,_=consume_quote(spec,quote)
                     self.assertEqual(payload({'compiled':compiled})['tools'],TOOL)
@@ -35,7 +41,7 @@ class VideoWebSearch(unittest.TestCase):
                     self.assertEqual(spec,before)
                     self.assertNotIn('tools',quote['input'])
                     self.assertNotIn('tools',quote['calculation'])
-                    self.assertEqual(quote['result']['status'],'estimate' if model=='seedance-2.5' or mode is None else 'unknown')
+                    self.assertEqual(quote['result']['status'],'estimate')
                     self.assertNotIn('tools.web_search_cost',[u['field'] for u in quote['result']['uncertainties']])
 
     def test_only_documented_tool_shape_is_accepted(self):
@@ -100,7 +106,7 @@ class VideoWebSearch(unittest.TestCase):
             self.assertFalse(any('search' in step['name'] for step in search['calculation']['steps']))
             invalid={**search['input'],'tools':TOOL}
             with patch('sys.stdin',io.StringIO(json.dumps(invalid))), self.assertRaisesRegex(ValueError,'Unknown cost input fields'):
-                estimate_cost.run(SimpleNamespace(workdir=tmp))
+                cost_command.run(SimpleNamespace(workdir=tmp))
 
     def test_recorded_disabled_search_rejects_implicit_enabled_default(self):
         with tempfile.TemporaryDirectory() as tmp:

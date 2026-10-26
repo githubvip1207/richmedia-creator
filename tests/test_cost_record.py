@@ -1,4 +1,4 @@
-"""Persist enough evidence to reconstruct costs without current prices or media."""
+"""保存充分依据，使价格和媒体变化后仍能还原原始费用计算。"""
 import copy
 import datetime as dt
 import math
@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from core.media_probe import calculate_asset_inputs
+from providers import calculate_asset_inputs
 
 
 class CostAudit(unittest.TestCase):
@@ -18,7 +18,8 @@ class CostAudit(unittest.TestCase):
             if data['operation'] == 'decompose-layers':
                 metadata['mime'] = 'image/png'
             if asset['kind'] == 'video':
-                metadata.update(width=1280, height=720, duration=8.0)
+                metadata.update(width=1280, height=720, duration=8.0, bytes=200,
+                                format_name='mov,mp4', codec_name='h264', frame_rate=24)
             return {**asset, 'metadata': metadata}
         with patch('core.media_probe.probe_asset', side_effect=measure):
             return calculate_asset_inputs(data, fx=fx)
@@ -84,7 +85,8 @@ class CostAudit(unittest.TestCase):
                              'assets': [{'id': 'clip', 'kind': 'video', 'source': 'https://example.com/c.mp4'}]})
         c, result = record['calculation'], record['result']
         self.assertEqual(c['formula_tokens'][0], c['formula_tokens'][1])
-        self.assertIsNone(c['tokens'][1])
-        self.assertIsNone(result['amount']['max'])
-        self.assertEqual(result['status'], 'lower_bound')
+        self.assertGreaterEqual(c['tokens'][1], c['tokens'][0])
+        self.assertIn(c['minimum_tokens_evidence']['method'], ('public_example_scaled', 'public_example_rounded'))
+        self.assertGreaterEqual(result['amount']['max'], result['amount']['min'])
+        self.assertEqual(result['status'], 'estimate')
         self.assertTrue(all(u['field'] and u['reason'] for u in result['uncertainties']))

@@ -1,4 +1,4 @@
-"""The public API exposes exactly seven capabilities and explicit modes."""
+"""公开接口仅提供七种能力，模式必须明确指定。"""
 import copy
 import sys
 import unittest
@@ -6,11 +6,11 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 from commands import submit as submit_command
 from core.operations import OPERATIONS, internal_operation
-from core.request import CATALOGS
-from core.legacy_request import compile_request
-from core.cost_quote import consume_quote
+from core.catalogs import CATALOGS
+from legacy_request import compile_request
+from providers import consume_quote
 from cost_fixture import calculate, as_native, save_with_cost
-from core.media_probe import calculate_asset_inputs
+from providers import calculate_asset_inputs
 from test_runtime import video, asset
 
 
@@ -89,8 +89,8 @@ class SevenOperations(unittest.TestCase):
 
     def test_image_to_image_no_mode_reaches_provider_unchanged(self):
         from unittest.mock import patch
-        from core.request import compile_request as compile_native
-        from providers import volcengine
+        from providers import compile_request as compile_native
+        from providers.volcengine import client as volcengine
         spec = {'provider': 'volcengine', 'operation': 'image-to-image', 'payload': {}}
         with patch.object(volcengine, 'request') as post, self.assertRaisesRegex(ValueError, 'exact image model ID'):
             compile_native(spec)

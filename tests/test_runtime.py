@@ -1,6 +1,6 @@
 # 离线行为测试：覆盖模型参数、估算、不可变计划、提交保护与媒体保存。
 # 所有生成请求通过 mock 替代，不访问真实付费 API；测试素材与批准文本均为测试夹具。
-"""Offline behavioral checks. No actual paid API is called."""
+"""离线行为校验，不调用真实付费 API。"""
 import base64
 import copy
 import datetime as dt
@@ -20,10 +20,10 @@ from commands import submit as submit_command, status as status_command, deliver
 from config_fixture import config_fixture
 from core import submission_store as store
 from cost_fixture import save_with_cost
-from core.request import CATALOGS, ROOT
-from core.legacy_request import compile_request
-from core.cost_formula import estimate
-from providers import volcengine
+from core.catalogs import CATALOGS, ROOT
+from legacy_request import compile_request
+from providers import estimate
+from providers.volcengine import client as volcengine
 
 
 # 构造视频请求测试夹具，默认记录已应用优化器；关键字参数可覆盖不同测试场景。
@@ -193,8 +193,8 @@ class PriceBehavior(unittest.TestCase):
         c = compile_request(video(operation='reference-to-video', mode='reference',assets=[asset()],parameters={'ratio':'16:9'}))
         e = estimate(c)
         self.assertEqual(e['input_video_seconds'],8)
-        self.assertEqual(e['status'],'lower_bound')
-        self.assertIsNone(e['amount_cny'][1])
+        self.assertEqual(e['status'],'estimate')
+        self.assertGreaterEqual(e['amount_cny'][1], e['amount_cny'][0])
         floor = e['tokens'][0]*2
         resolved = estimate(c,{'minimum_billable_tokens':floor,'minimum_tokens_source':'https://docs.volcengine.com/example'})
         self.assertEqual(resolved['tokens'],[floor,floor])
@@ -204,8 +204,9 @@ class PriceBehavior(unittest.TestCase):
         c = compile_request(video(operation='image-to-video', assets=[asset('image','first_frame')]))
         c['assets'][0]['metadata'].update(width=1300, height=1000)
         e = estimate(c)
-        self.assertIsNone(e['amount_cny'])
-        self.assertEqual(e['status'],'unknown')
+        self.assertGreater(e['amount_cny'][0], 0)
+        self.assertEqual(e['status'],'estimate')
+        self.assertTrue(e['uncertainties'])
 
     # 多图融合的 Pro 报价必须包含第一张之后的输入附加费，图片 Token 仍保持未知。
     def test_image_price_includes_references(self):
@@ -320,7 +321,7 @@ class JobBehavior(unittest.TestCase):
     # 本地输入只在提交时转换为 Base64，计划中不保存 data URI。
     # 检查模拟图片同步成功、下载字节保持原样、usage 保留且实际扣费金额仍未知。
     def test_local_image_materialization_and_original_download(self):
-        from providers.transport import payload
+        from core.payload import payload
         path = Path(self.tmp.name)/'input.png'
         data = png()
         path.write_bytes(data)

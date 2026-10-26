@@ -73,7 +73,7 @@ class StatusWait(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.record = Path(self.tmp.name)/'submit-001.json'
-        store.write(self.record, {'execution':{'compiled':{'provider':'volcengine','kind':'video'},
+        store.write(self.record, {'execution':{'compiled':{'provider':'volcengine','kind':'video','operation':'text-to-video'},
                                             'task_id':'fixture', 'state':'queued'}})
 
     def test_can_wait_beyond_previous_45_seconds(self):
@@ -124,7 +124,8 @@ class StatusWait(unittest.TestCase):
 
     def test_image_returns_immediately_even_with_wait(self):
         record=store.read(self.record)
-        record['execution']['compiled']['kind']='image'
+        record['execution']['compiled'].update(kind='image', operation='text-to-image', quantity=1)
+        record['response']={'data':[{'url':'https://example.com/result.png'}]}
         record['execution']['state']='succeeded'
         store.write(self.record,record)
         with patch.object(status_command, 'query_submission') as query, patch.object(status_command.time,'sleep') as sleep:

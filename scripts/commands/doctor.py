@@ -1,125 +1,142 @@
-"""doctor: repair dependencies or the project's exchange-rate configuration."""
-import datetime as dt
-import json
-import os
-import shutil
-import subprocess
-import tempfile
-import urllib.request
+r"""命令行调用
+
+    python3 "$SKILL/scripts/main.py" doctor
+    python3 "$SKILL/scripts/main.py" doctor --dependencies --exchange-rate --pricing
+
+    # --dependencies：仅选择依赖修复类别，可选，默认不单独选择。
+    # --exchange-rate：选择更新当前项目 .env 汇率，可选。
+    # --pricing：选择核对并更新技能中的价格快照，可选。
+    # 开关可组合；全部省略时，只修复缺失依赖和异常汇率。
+
+输入文件格式
+
+不接收命令行指定的 JSON 文件，也不读取 stdin。
+读取当前目录 .env；它是 KEY=VALUE 文本，不是 JSON，格式见 __init__.py 的运行上下文。
+
+标准输出格式
+
+```jsonc
+{
+  "repairs": [ // Repair[]；实际执行的修复结果；无需修复时可以为空。
+    {
+      "item": "exchange_rate", // string；sd25-pe/ffprobe/exchange_rate/volcengine_pricing/byteplus_pricing。
+      "status": "repaired", // "repaired" | "failed"；此项修复成功或失败。
+      "reason": "示例说明：输出时长由模型自动决定", // string?；部分失败分支提供的原因；不是所有失败分支都会有该字段。
+      "rate": 7.0, // number?；仅汇率更新成功时：1 美元对应人民币金额。
+      "expires_at": "2026-10-27T00:00:00+00:00", // string?；仅汇率更新成功时：带时区 ISO 8601 到期时间。
+      "data_date": "2026-10-26", // string?；仅汇率更新成功时：数据源汇率观测日 YYYY-MM-DD。
+      "source": "https://example.com/reference.png", // string?；仅汇率更新成功时：固定公开汇率源 URL。
+      "verified_on": "2026-10-26" // string?；仅价格更新成功时：快照核实日期 YYYY-MM-DD。
+    }
+  ],
+  "check": { // CheckReport；修复后完整检查；所有嵌套字段见 commands/check.py。
+    "pricing": { // object；各供应商本地价格快照的时效；不发起联网核价。
+      "volcengine": { // Freshness；status/age_days/verified_on，逐字段见 __init__.py。
+        "status": "fresh", // "fresh" | "stale" | "invalid"；7 天以内、过期或日期无效。
+        "age_days": 0, // integer | null；距核实日期的 UTC 天数；无法解析时 null。
+        "verified_on": "2026-10-26" // string | null；YYYY-MM-DD 核实日期；缺失时 null。
+      }
+    },
+    "configuration": { // object；项目配置诊断，不包含任何密钥原文。
+      "file": "/absolute/project/.env", // string | null；实际读取的 .env 绝对路径；未找到时 null。
+      "status": "ok", // "ok" | "missing"；是否找到项目 .env，不表示供应商鉴权成功。
+      "suppliers": [ // object[]；已配置非空 API 密钥的供应商列表。
+        {
+          "id": "volcengine", // Provider；供应商标识。
+          "name": "formula_tokens" // string；供应商显示名称。
+        }
+      ],
+      "issues": [ // object[]；缺失供应商密钥的诊断条目。
+        {
+          "item": "exchange_rate", // string；缺失配置名称，例如 VOLCENGINE_API_KEY。
+          "status": "missing", // "missing"；当前条目状态。
+          "action": "运行对应 doctor 修复命令" // string；本地配置建议，不包含密钥。
+        }
+      ],
+      "exchange_rate": { // object；项目 USD/CNY 缓存状态。
+        "status": "ok", // "ok" | "missing" | "expired" | "invalid"；汇率检查结果。
+        "expires_at": "2026-10-27T00:00:00+00:00", // string?；仅有效时出现；带时区 ISO 8601 到期时间。
+        "action": "运行对应 doctor 修复命令" // string?；非有效状态时出现；修复建议。
+      }
+    },
+    "dependencies": { // object；两项必需依赖的本地安装情况。
+      "sd25_pe": { // DependencyStatus；提示词优化技能的检查结果，定义见下。
+        "status": "ok", // "ok" | "missing"；依赖可用或缺失。
+        "path": "/absolute/output.png", // string?；可用时出现；技能文件或程序绝对路径。
+        "action": "运行对应 doctor 修复命令" // string?；缺失时出现；安装/修复建议。
+      },
+      "ffprobe": { // DependencyStatus；媒体测量工具的检查结果，定义见下。
+        "status": "ok", // "ok" | "missing"；依赖可用或缺失。
+        "path": "/absolute/output.png", // string?；可用时出现；技能文件或程序绝对路径。
+        "action": "运行对应 doctor 修复命令" // string?；缺失时出现；安装/修复建议。
+      }
+    },
+    "network_checked": false // false；未请求供应商 API，不能据此确认密钥可用。
+  },
+  "note": "说明文本" // string；密钥需本地配置、本次未提交生成等说明。
+}
+```
+
+文件输出格式
+
+- 启用汇率修复时：更新当前目录 .env 的 USD_CNY 与 USD_CNY_EXPIRES_AT；仍为 KEY=VALUE 文本，格式见 __init__.py。
+- --pricing 成功时：更新 models/<provider>-pricing.json；完整 JSON 格式见 __init__.py 的“价格快照文件”。
+- 依赖修复通过安装器完成，不产生本命令自定义的 JSON 输出文件。
+
+失败输出
+
+修复项含 failed 时，仍输出上述完整 stdout 报告，退出码为 1。其他已捕获异常格式见 __init__.py。
+"""
+
 import urllib.error
-from pathlib import Path
-from core.envfile import fx_state, FX_URL
-from core import dependencies
+from core.exchange_rate import fx_state, update_exchange_rate
+from core.dependencies import repair_dependencies
 from .check import check
 
 
-def run_installer(command):
-    """不把安装器输出直接回显，避免外部配置或日志中的敏感信息进入诊断结果。"""
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=600)
-        return result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
-
-
-def repair_dependencies():
-    results = []
-    if dependencies.skill_status()['status'] != 'ok':
-        if not shutil.which('npx'):
-            results.append({'item': 'sd25-pe', 'status': 'failed', 'reason': 'npx is unavailable; install Node.js/npm first'})
-        else:
-            ok = run_installer(['npx', '--yes', 'skills@latest', 'add', 'https://arkdocs.tos-cn-beijing.volces.com/skills/',
-                                '--skill', 'sd25-pe', '--global', '--yes'])
-            results.append({'item': 'sd25-pe', 'status': 'repaired' if ok and dependencies.skill_status()['status'] == 'ok' else 'failed'})
-    if not shutil.which('ffprobe'):
-        if not shutil.which('brew'):
-            results.append({'item': 'ffprobe', 'status': 'failed', 'reason': 'Homebrew is unavailable; install FFmpeg using your system package manager'})
-        else:
-            ok = run_installer(['brew', 'install', 'ffmpeg'])
-            results.append({'item': 'ffprobe', 'status': 'repaired' if ok and shutil.which('ffprobe') else 'failed'})
-    return results
-
-
-def save_exchange_rate(rate, expiry):
-    """原子更新两个汇率项，保留其他配置、行尾注释及换行风格；失败时不覆盖原文件。"""
-    path = Path.cwd() / '.env'
-    if path.is_symlink():
-        raise ValueError('Refusing to replace a symlinked .env')
-    original = path.read_bytes() if path.exists() else b''
-    text = original.decode('utf-8')
-    newline = '\r\n' if '\r\n' in text else '\n'
-    values = {'USD_CNY': str(rate), 'USD_CNY_EXPIRES_AT': expiry}
-    import re
-    found = set()
-    output = []
-    pattern = re.compile(r'^(\s*(?:export\s+)?)(USD_CNY|USD_CNY_EXPIRES_AT)(\s*=\s*)(.*?)(\r?\n)?$')
-    for line in text.splitlines(keepends=True):
-        match = pattern.match(line)
-        if not match:
-            output.append(line)
-            continue
-        prefix, key, separator, old, ending = match.groups()
-        # 保留空白后开始的行尾注释；被引号包住的 # 属于原值，不当作注释。
-        comment = re.search(r'\s+#.*$', old)
-        suffix = comment.group() if comment else ''
-        output.append(prefix + key + separator + values[key] + suffix + (ending or ''))
-        found.add(key)
-    updated = ''.join(output)
-    for key, value in values.items():
-        if key not in found:
-            if updated and not updated.endswith(('\n', '\r')):
-                updated += newline
-            updated += key + '=' + value + newline
-    fd, temp = tempfile.mkstemp(prefix='.env-fx-', dir=str(path.parent))
-    try:
-        os.fchmod(fd, (path.stat().st_mode & 0o777) if path.exists() else 0o600)
-        with os.fdopen(fd, 'wb') as stream:
-            stream.write(updated.encode('utf-8'))
-            stream.flush()
-            os.fsync(stream.fileno())
-        # 避免下载汇率期间其他进程修改配置后被静默覆盖。
-        if (path.read_bytes() if path.exists() else b'') != original:
-            raise ValueError('.env changed during update; retry exchange-rate repair')
-        os.replace(temp, path)
-    finally:
-        if os.path.exists(temp):
-            os.unlink(temp)
-
-
-def update_exchange_rate():
-    """固定使用 ECB 数据源的 USD/CNY；缓存有效期为数据日期 UTC 零点起七天。"""
-    from core.envfile import validate_fx
-    # 显式客户端标识与 JSON 接收类型，避免默认 Python 标识被公开接口网关拒绝。
-    request = urllib.request.Request(FX_URL, headers={'User-Agent': 'RichMedia-Creator/1.0', 'Accept': 'application/json'})
-    with urllib.request.urlopen(request, timeout=25) as response:
-        result = json.load(response)
-    if not isinstance(result, dict) or result.get('base', '').upper() != 'USD' or result.get('quote', '').upper() != 'CNY':
-        raise ValueError('Unexpected exchange-rate currency pair')
-    observation = dt.date.fromisoformat(result['date'])
-    today = dt.datetime.now(dt.timezone.utc).date()
-    if observation > today:
-        raise ValueError('Exchange-rate observation is in the future')
-    expiry = dt.datetime.combine(observation + dt.timedelta(days=7), dt.time.min, tzinfo=dt.timezone.utc).isoformat()
-    fx = validate_fx({'usd_cny': result['rate'], 'expires_at': expiry})
-    save_exchange_rate(fx['usd_cny'], expiry)
-    return {'item': 'exchange_rate', 'status': 'repaired', 'rate': fx['usd_cny'],
-            'expires_at': expiry, 'data_date': observation.isoformat(), 'source': FX_URL}
-
-
-def doctor(dependencies=False, exchange_rate=False):
+def doctor(dependencies=False, exchange_rate=False, pricing=False):
     """无选项时修复缺失依赖及异常汇率；定向参数只处理指定类别，最后始终复查。"""
-    all_items = not dependencies and not exchange_rate
+    all_items = not dependencies and (not exchange_rate) and not pricing
     results = repair_dependencies() if dependencies or all_items else []
-    if exchange_rate or (all_items and fx_state()['status'] != 'ok'):
+    if exchange_rate or (all_items and fx_state()["status"] != "ok"):
         try:
             results.append(update_exchange_rate())
         except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError) as error:
-            detail = ('HTTP ' + str(error.code)) if isinstance(error, urllib.error.HTTPError) else type(error).__name__
-            results.append({'item': 'exchange_rate', 'status': 'failed', 'reason': 'Could not obtain a valid fresh rate (' + detail + '); previous .env values were preserved'})
+            detail = (
+                "HTTP " + str(error.code)
+                if isinstance(error, urllib.error.HTTPError)
+                else type(error).__name__
+            )
+            results.append(
+                {
+                    "item": "exchange_rate",
+                    "status": "failed",
+                    "reason": "Could not obtain a valid fresh rate ("
+                    + detail
+                    + "); previous .env values were preserved",
+                }
+            )
+    if pricing:
+        from core.pricing import load_pricing, refresh
+        from core.catalogs import ROOT
+        from core.submission_store import write
+        for provider in ('volcengine', 'byteplus'):
+            previous = load_pricing(provider)
+            updated = refresh(provider, previous, None)
+            if updated.get('refresh_status'):
+                results.append({'item': provider + '_pricing', 'status': 'failed',
+                                'reason': updated['refresh_status']})
+            else:
+                write(ROOT / 'models' / (provider + '-pricing.json'), updated)
+                results.append({'item': provider + '_pricing', 'status': 'repaired',
+                                'verified_on': updated['verified_on']})
     report = check()
-    return {'repairs': results, 'check': report,
-            'note': 'Missing API keys must be supplied locally. No media generation was submitted.'}
+    return {
+        "repairs": results,
+        "check": report,
+        "note": "Missing API keys must be supplied locally. No media generation was submitted.",
+    }
 
 
 def run(args):
-    return doctor(args.dependencies, args.exchange_rate)
+    return doctor(args.dependencies, args.exchange_rate, getattr(args, 'pricing', False))

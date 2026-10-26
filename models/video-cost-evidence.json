@@ -1,0 +1,106 @@
+{
+  "verified_on": "2026-10-25",
+  "basis": "Official rounded 5s, 16:9, with-video minimum price examples. Not the inaccessible minimum-token table. Other specifications use explicitly labelled area/time extrapolation.",
+  "table_sources": {
+    "2.0": "https://bytedance.larkoffice.com/wiki/H0fUwHPxtiHayOk6CVpcZzKqnHJ?table=tblnV1KjhYJO12Zh&view=vewWPcN5zJ",
+    "2.5": "https://bytedance.larkoffice.com/wiki/H0fUwHPxtiHayOk6CVpcZzKqnHJ?table=tblTUnmKaxBSqpU7&view=vewpCgsiHf"
+  },
+  "providers": {
+    "volcengine": {
+      "source": "https://docs.volcengine.com/docs/ark/model-pricing?lang=zh",
+      "rounding": 0.005,
+      "examples": {
+        "seedance-2.5": {
+          "480p": 3.63,
+          "720p": 8.16,
+          "1080p": 20.12
+        },
+        "seedance-2.0": {
+          "480p": 2.53,
+          "720p": 5.44,
+          "1080p": 13.56,
+          "4k": 27.99
+        },
+        "seedance-2.0-fast": {
+          "480p": 1.99,
+          "720p": 4.28
+        },
+        "seedance-2.0-mini": {
+          "480p": 1.27,
+          "720p": 2.72
+        }
+      },
+      "rates": {
+        "seedance-2.5": {
+          "480p": 42,
+          "720p": 42,
+          "1080p": 46
+        },
+        "seedance-2.0": {
+          "480p": 28,
+          "720p": 28,
+          "1080p": 31,
+          "4k": 16
+        },
+        "seedance-2.0-fast": {
+          "480p": 22,
+          "720p": 22
+        },
+        "seedance-2.0-mini": {
+          "480p": 14,
+          "720p": 14
+        }
+      },
+      "table_source": "https://bytedance.larkoffice.com/wiki/FXaYwxzJ5i5Zdik32ipcWzt7nxd?table=tblheIYDXXwYM43b&view=vew2CR2JYM"
+    },
+    "byteplus": {
+      "source": "https://docs.byteplus.com/en/docs/modelark/model-pricing",
+      "rounding": 0.005,
+      "examples": {
+        "seedance-2.5": {
+          "480p": 0.553,
+          "720p": 1.244,
+          "1080p": 3.062
+        },
+        "seedance-2.0": {
+          "480p": 0.39,
+          "720p": 0.84,
+          "1080p": 2.06,
+          "4k": 4.2
+        },
+        "seedance-2.0-fast": {
+          "480p": 0.3,
+          "720p": 0.64
+        },
+        "seedance-2.0-mini": {
+          "480p": 0.19,
+          "720p": 0.41
+        }
+      },
+      "rates": {
+        "seedance-2.5": {
+          "480p": 6.4,
+          "720p": 6.4,
+          "1080p": 7
+        },
+        "seedance-2.0": {
+          "480p": 4.3,
+          "720p": 4.3,
+          "1080p": 4.7,
+          "4k": 2.4
+        },
+        "seedance-2.0-fast": {
+          "480p": 3.3,
+          "720p": 3.3
+        },
+        "seedance-2.0-mini": {
+          "480p": 2.1,
+          "720p": 2.1
+        }
+      },
+      "rounding_by_model": {
+        "seedance-2.5": 0.0005
+      }
+    }
+  }
+}
