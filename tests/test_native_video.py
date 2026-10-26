@@ -31,7 +31,7 @@ def request(provider='volcengine', model='seedance-2.5', mode=None):
                         'resolution': '480p', 'ratio': 'adaptive' if mode else '16:9',
                         'duration': 4, 'generate_audio': False, 'watermark': False,
                         'return_last_frame': False, 'service_tier': 'default'}}
-    if provider == 'volcengine' and model == 'seedance-2.0-mini':
+    if provider == 'volcengine':
         spec['payload'].pop('service_tier')
     if model == 'seedance-2.5':
         spec['payload']['output_format'] = 'mp4'
@@ -102,21 +102,22 @@ class NativeVideo(unittest.TestCase):
                     with self.subTest(service_tier=value), self.assertRaisesRegex(ValueError, 'must omit service_tier'):
                         compile_request(invalid)
 
-    def test_other_video_models_and_byteplus_keep_service_tier(self):
+    def test_service_tier_matches_supplier_rules_for_all_models(self):
         for provider in ('volcengine', 'byteplus'):
             for model in ('seedance-2.5', 'seedance-2.0', 'seedance-2.0-fast', 'seedance-2.0-mini'):
-                if provider == 'volcengine' and model == 'seedance-2.0-mini':
-                    continue
                 for mode in (None, 'first-frame', 'first-last-frame'):
                     with self.subTest(provider=provider, model=model, mode=mode):
                         spec = request(provider, model, mode)
                         assets = [{**{k: v for k, v in a.items() if k != 'metadata'}, **a['metadata']}
                                   for a in measured(spec)]
-                        compiled = compile_request(spec, assets)
-                        self.assertEqual(payload({'compiled': compiled})['service_tier'], 'default')
-                        spec['payload'].pop('service_tier')
-                        with self.assertRaisesRegex(ValueError, 'service_tier is required'):
-                            compile_request(spec, assets)
+                        spec['payload'].pop('service_tier', None)
+                        self.assertNotIn('service_tier', payload({'compiled': compile_request(spec, assets)}))
+                        spec['payload']['service_tier'] = 'default'
+                        if provider == 'volcengine':
+                            with self.assertRaisesRegex(ValueError, 'must omit service_tier'):
+                                compile_request(spec, assets)
+                        else:
+                            self.assertEqual(payload({'compiled': compile_request(spec, assets)})['service_tier'], 'default')
 
     def test_constraints_reject_wrong_models_fields_and_parameter_types(self):
         for changes in ({'duration': True}, {'duration': 3}, {'duration': 31}, {'resolution': '4k'},
@@ -150,9 +151,7 @@ class NativeVideo(unittest.TestCase):
 
     def test_fixed_output_settings_and_internal_options_cannot_be_overridden(self):
         for provider in ('volcengine', 'byteplus'):
-            for fields in ({'watermark': True}, {'return_last_frame': True}, {'output_format': 'mov'},
-                           {'priority': 0}, {'execution_expires_after': 172800},
-                           {'callback_url': 'https://example.com/callback'}, {'safety_identifier': 'example'}):
+            for fields in ({'priority': 0}, {'execution_expires_after': 172800}, {'draft': False}):
                 with self.subTest(provider=provider,fields=fields):
                     spec = request(provider); spec['payload'].update(fields)
                     with self.assertRaises(ValueError): compile_request(spec)
@@ -164,7 +163,7 @@ class NativeVideo(unittest.TestCase):
                 record=store.read(work/'request.json')
                 parameters=record['providers'][provider]['parameters']
                 for key in ('watermark','return_last_frame','output_format','service_tier'):
-                    parameters.pop(key)
+                    parameters.pop(key, None)
                 store.write(work/'request.json',record)
                 with config_fixture({adapter.KEY_ENV:'fixture'}), patch('commands.submit.require_dependencies'), \
                         patch.object(adapter,'request',return_value={'id':'task'}) as post:
@@ -173,7 +172,7 @@ class NativeVideo(unittest.TestCase):
                 post.assert_called_once()
 
     def test_missing_settings_and_content_bypass_are_rejected(self):
-        for key in request()['payload']:
+        for key in set(request()['payload']) - {'output_format', 'service_tier'}:
             spec = request(); spec['payload'].pop(key)
             with self.subTest(missing=key), self.assertRaises(ValueError): compile_request(spec)
         for content in ([], [{'type':'text', 'text':'hi --dur 30'}],

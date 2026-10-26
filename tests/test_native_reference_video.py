@@ -277,6 +277,11 @@ class ReferenceVideo(unittest.TestCase):
                     for asset in spec['assets']:
                         asset['source'] = 'https://example.com/' + asset['id']
                     quote = quote_for(spec)
+                    # 这三个官方字段按当前约定暂不适配；示例保留其说明。
+                    with self.assertRaisesRegex(ValueError, 'Unsupported native video payload fields'):
+                        consume_quote(spec, quote)
+                    for field in ('draft', 'execution_expires_after', 'priority'):
+                        spec['payload'].pop(field)
                     _, compiled, _, _ = consume_quote(spec, quote)
                     self.assertEqual(compiled['provider'], provider)
                     self.assertEqual(compiled['operation'], operation)

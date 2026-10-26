@@ -31,6 +31,8 @@ r"""命令行调用
     "volcengine": { // object；一家供应商的模型、能力、参数和有序素材引用。
       "model": "doubao-seedance-2-5-260628", // string；本供应商技能模型别名或准确模型 ID。
       "operation": "image-to-video", // Operation；与 intent.operation 对应的已实现能力。
+      // "mode": "reference", // string?；参考生视频必填 reference/edit；延长必填 before/after；其他任务省略，与估价和提交顶层一致。
+      // "estimate_context": {}, // object?；估价使用时，完整保留同一家供应商的估价依据，与提交顶层一致；未使用时省略。
       "parameters": { // object；按该能力已确定的生成参数；每个字段见 __init__.py。
         "ratio": "adaptive", // string?；构图比例；视频还可用 adaptive，图片不直接发送 ratio 字段。
         "resolution": "480p", // string?；视频分辨率，如 480p/720p/1080p/4k，须模型支持。
@@ -39,7 +41,7 @@ r"""命令行调用
         "watermark": false, // boolean?；是否添加水印；具体能力可能要求固定值。
         "return_last_frame": false, // boolean?；是否返回视频对应尾帧图。
         "output_format": "mp4", // string?；图片 png/jpeg，视频 mp4/mov，受模型限制。
-        "service_tier": "default", // string?；视频服务档位；当前为 default，2.0-mini 必须省略。
+        // "service_tier": "default", // string?；视频服务档位；Volcengine 省略；BytePlus 可省略，填写时仅支持 default。
         "tools": [] // Tool[]?；视频联网搜索设置；供应商/能力可能限制或省略。
       },
       "assets": [ // AssetRef[]；引用顶层素材 id，保留模型所需顺序，无素材传 []。

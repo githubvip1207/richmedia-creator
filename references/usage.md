@@ -48,6 +48,7 @@ scripts/
 │       └── 同名的七个能力模块
 └── core/                           公共工具，按功能拆文件
     ├── validation.py               基础条件和数值校验
+    ├── video_options.py            视频输出、服务等级、回调和用户标识校验
     ├── catalogs.py                 读取本地模型目录
     ├── operations.py               七种能力及模式标识
     ├── envfile.py                  项目 .env 解析

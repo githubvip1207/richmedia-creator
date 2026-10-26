@@ -118,7 +118,7 @@ Parameters（JSON 字段模板；按能力选用）
   "response_format": "url", // string?；图片响应形式，当前原生生成要求 url。
   "background": "opaque", // string?；图片背景参数，如 opaque；按对应能力规则。
   "layer_decomposition": false, // boolean?；是否拆分图层；须与 operation 一致。
-  "service_tier": "default", // string?；视频服务档位；当前为 default，2.0-mini 必须省略。
+  // "service_tier": "default", // string?；视频服务档位；Volcengine 省略；BytePlus 可省略，填写时仅支持 default。
   "tools": [ // Tool[]?；Volcengine 2.5 或纯文本视频可启用；2.0 系列含素材时必须 []；BytePlus 省略。
     {
       "type": "web_search" // "web_search"；联网搜索工具类型；空 tools 数组表示关闭。
@@ -153,7 +153,7 @@ NativePayload（JSON 字段模板；按能力选用）
   "duration": 5, // integer?；视频输出时长；自动模式为 -1。
   "generate_audio": false, // boolean?；视频是否生成声音。
   "return_last_frame": false, // boolean?；视频是否返回尾帧图。
-  "service_tier": "default", // string?；视频服务档位；部分模型不接受该字段。
+  // "service_tier": "default", // string?；视频服务档位；Volcengine 省略；BytePlus 可省略，填写时仅支持 default。
   "tools": [ // Tool[]?；视频允许的搜索工具；空数组关闭。
     {
       "type": "web_search" // "web_search"；联网搜索工具类型；空 tools 数组表示关闭。

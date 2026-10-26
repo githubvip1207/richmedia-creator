@@ -110,6 +110,8 @@ description: 生成和编辑图片与视频。支持文生图、图生图、图�
     "volcengine": {
       "model": "doubao-seedream-5-0-flash-260915", // 必需：该供应商的模型别名或准确 ID
       "operation": "image-to-image", // 必需：该供应商支持的能力，与 intent.operation 对应
+      // "mode": "reference", // 参考生视频必填 reference/edit；视频延长必填 before/after；其他任务省略。须与估价、提交 JSON 顶层的 mode 一致。
+      // "estimate_context": {}, // 估价使用此字段时，完整保留同一家供应商的估价依据，并与提交 JSON 顶层的同名字段一致；未使用时省略。
       "parameters": { // 必需：按供应商能力要求整理已确定的参数
         "size": "1K", // 本例输出尺寸档位
         "ratio": "1:1" // 本例构图比例

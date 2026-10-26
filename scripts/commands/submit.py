@@ -35,7 +35,7 @@ r"""命令行调用
     "duration": 5, // integer?；视频输出时长；自动模式为 -1。
     "generate_audio": false, // boolean?；视频是否生成声音。
     "return_last_frame": false, // boolean?；视频是否返回尾帧图。
-    "service_tier": "default", // string?；视频服务档位；部分模型不接受该字段。
+    // "service_tier": "default", // string?；视频服务档位；Volcengine 省略；BytePlus 可省略，填写时仅支持 default。
     "tools": [] // Tool[]?；视频允许的搜索工具；空数组关闭。
   },
   "assets": [ // Asset[]?；有序实际素材，须带 id/kind/source/purpose；文生图必须省略此字段；文生视频可省略或传 []。
@@ -166,7 +166,7 @@ delivery/delivery_history 随生命周期出现，不是提交瞬间全部都有
         "response_format": "url", // string?；图片响应形式，当前原生生成要求 url。
         "background": "opaque", // string?；图片背景参数，如 opaque；按对应能力规则。
         "layer_decomposition": false, // boolean?；是否拆分图层；须与 operation 一致。
-        "service_tier": "default", // string?；视频服务档位；当前为 default，2.0-mini 必须省略。
+        // "service_tier": "default", // string?；视频服务档位；Volcengine 省略；BytePlus 可省略，填写时仅支持 default。
         "tools": [ // Tool[]?；视频联网搜索设置；供应商/能力可能限制或省略。
           {
             "type": "web_search" // "web_search"；联网搜索工具类型；空 tools 数组表示关闭。
@@ -195,7 +195,7 @@ delivery/delivery_history 随生命周期出现，不是提交瞬间全部都有
         "duration": 5, // integer?；视频输出时长；自动模式为 -1。
         "generate_audio": false, // boolean?；视频是否生成声音。
         "return_last_frame": false, // boolean?；视频是否返回尾帧图。
-        "service_tier": "default", // string?；视频服务档位；部分模型不接受该字段。
+        // "service_tier": "default", // string?；视频服务档位；Volcengine 省略；BytePlus 可省略，填写时仅支持 default。
         "tools": [ // Tool[]?；视频允许的搜索工具；空数组关闭。
           {
             "type": "web_search" // "web_search"；联网搜索工具类型；空 tools 数组表示关闭。
@@ -482,6 +482,13 @@ def validate_requirement(directory, spec, compiled):
             == compiled["parameters"].get("tools", default_tools),
             "Submission search settings differ from request.json; update and reconfirm",
         )
+        # 非默认输出及回调设置必须在已确认方案中明确记录。
+        for key, default in (('watermark', False), ('return_last_frame', False),
+                             ('output_format', 'mp4'), ('callback_url', None),
+                             ('safety_identifier', None)):
+            if compiled['parameters'].get(key, default) != default:
+                require(key in parameters,
+                        'Video option ' + key + ' missing from request.json; update the plan and reconfirm')
         required = {"resolution", "duration", "generate_audio"}
         if compiled["operation"] == "text-to-video" or (
             compiled["operation"] == "reference-to-video" and compiled.get("mode") == "reference"

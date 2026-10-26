@@ -10,6 +10,7 @@ import json
 import math
 import re
 from core.validation import require, number
+from core.video_options import validate_video_options
 from core.catalogs import ROOT, CATALOGS, RATIOS
 from core.operations import internal_operation
 from core.cost_record import build_record
@@ -144,6 +145,8 @@ def compile_request(spec, measured_assets=None):
         "return_last_frame",
         "output_format",
         "service_tier",
+        "callback_url",
+        "safety_identifier",
         "tools",
         "omni_reference_task_type",
     }
@@ -177,7 +180,6 @@ def compile_request(spec, measured_assets=None):
         ),
         "Inline API parameter flags are unsupported; resolve settings in payload before confirmation",
     )
-    omit_service_tier = False
     required_fields = (
         "resolution",
         "ratio",
@@ -186,10 +188,6 @@ def compile_request(spec, measured_assets=None):
         "watermark",
         "return_last_frame",
     )
-    if omit_service_tier:
-        require("service_tier" not in body, "This video request must omit service_tier")
-    else:
-        required_fields += ("service_tier",)
     for key in required_fields:
         require(
             key in body,
@@ -200,23 +198,7 @@ def compile_request(spec, measured_assets=None):
         "omni_reference_task_type is only supported for Seedance 2.5 multimodal video",
     )
     require(body["ratio"] == "adaptive", "Image-to-video requires ratio=adaptive")
-    for key in ("generate_audio", "watermark", "return_last_frame"):
-        require(type(body[key]) is bool, key + " must be a boolean")
-    fixed_fields = {"watermark": False, "return_last_frame": False}
-    if not omit_service_tier:
-        fixed_fields["service_tier"] = "default"
-    for key, value in fixed_fields.items():
-        require(
-            type(body[key]) is type(value) and body[key] == value,
-            "Video generation requires " + key + "=" + str(value),
-        )
-    if alias == "seedance-2.5":
-        require(body.get("output_format") == "mp4", "Seedance 2.5 requires output_format=mp4")
-    else:
-        require(
-            "output_format" not in body,
-            "Seedance 2.0 series must omit output_format; output is MP4",
-        )
+    validate_video_options(body, PROVIDER, alias)
     if "tools" in body:
         validate_video_tools("byteplus", "image-to-video", body["tools"])
     inputs = spec.get("assets", [])
